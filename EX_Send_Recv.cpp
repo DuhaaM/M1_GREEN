@@ -8,7 +8,7 @@
 #include <iostream>
 
 
-  
+/* 
 int main (int argc,char *argv[]) {
   int rang,nb_procs;
   int m=1000,etiquette=11;
@@ -49,6 +49,46 @@ int main (int argc,char *argv[]) {
     }
     std::cout << std::endl;
   }
+  MPI_Finalize();
+}*/
 
+int main (int argc,char *argv[]) {
+  int rang,nb_procs;
+  int m=1000,etiquette=11;
+  double A[m],B[m];
+
+  srand(time(NULL));
+
+  MPI_Init(&argc,&argv);
+  double temps_debut=MPI_Wtime();
+  MPI_Comm_rank(MPI_COMM_WORLD,&rang);
+  MPI_Comm_size(MPI_COMM_WORLD,&nb_procs);
+ 
+  if( nb_procs != 2){
+    if ( rang == 0 ) {
+      std::cout <<"Ce programme est éxécutable uniquement pour 2 processus"
+		<<std::endl;
+    }
+    MPI_Barrier( MPI_COMM_WORLD);
+    MPI_Abort(MPI_COMM_WORLD,EPERM);
+  }
+  if( rang == 0 ){
+    for(int n=0;n < m;n++) {
+      A[n]= rand() %( m+1);
+    }
+  }
+  else {
+    memset(A,0,m*sizeof(double));
+  }
+ 
+  MPI_Sendrecv_replace(A,m,MPI_DOUBLE,0,etiquette,1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+  double temps_fin=MPI_Wtime();
+  printf("Moi,processus %d,ai recu du processus %d :\n",rang,(rang+1)%2);
+  for(int j = 0; j < 1000 ; j++) {
+      std::cout << A[j] << "\t";
+    }
+    std::cout << std::endl;
+
+  printf("Le programme s'est réalise en %f secondes. \n",temps_fin-temps_debut);
   MPI_Finalize();
 }
