@@ -15,5 +15,4 @@ int main (int argc,char *argv[]){
 
   printf("Moi,processus %d,ai recu %d du processus 2\n",rang,valeur);
   MPI_Finalize();
-  return 0;
 }
