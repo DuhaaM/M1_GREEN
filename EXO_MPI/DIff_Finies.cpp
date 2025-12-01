@@ -70,6 +70,14 @@ int main (int argc, char *argv[]){
 	
       UTemp[i]=U[i]+ dt / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
     }
+
+
+    std::cout<<"t=" << t <<std::endl;
+
+    
+    for(i=1;i<N;i++){
+      std::cout<< "Vp*U =" << M_PI*M_PI*U[i] <<"\t"<< "Mat_Lap*U ="<<-(UTemp[i]-U[i])/dt<<std::endl ;	
+    }
     for(i=1;i<N;i++){
       U[i]=UTemp[i];	
     }
