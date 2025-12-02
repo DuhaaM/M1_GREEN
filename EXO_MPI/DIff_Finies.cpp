@@ -76,7 +76,7 @@ int main (int argc, char *argv[]){
 
     
     for(i=1;i<N;i++){
-      std::cout<< "Vp*U =" << M_PI*M_PI*U[i] <<"\t"<< "Mat_Lap*U ="<<-(UTemp[i]-U[i])/dt<<std::endl ;	
+      // std::cout<< "Vp*U =" << M_PI*M_PI*U[i] <<"\t"<< "Mat_Lap*U ="<<-(UTemp[i]-U[i])/dt<<std::endl ;	
     }
     for(i=1;i<N;i++){
       U[i]=UTemp[i];	
@@ -115,8 +115,8 @@ int main (int argc, char *argv[]){
     //std::cout<<"x[i]:"<<x[i]<<"\t"<<"x[i+1]:"<<x[i+1]<<std::endl;
     //std::cout<<u_num(xG1,i,U,x)<<"\t"<<u_num(xG2,i,U,x)<<std::endl;
     std::cout << "exp(-Tfinal) * u_init( xG1 ) = " << exp(-Tfinal) * u_init( xG1 ) << "\t u_num(xG1,i,U,x) = " << u_num(xG1,i,U,x) << std::endl;
-    ERR += 1/(2*double(N)) * (exp(-Tfinal) * u_init( xG1 ) - u_num(xG1,i,U,x)) * (exp(-Tfinal) * u_init( xG1 ) - u_num(xG1,i,U,x));
-    ERR += 1/(2*double(N)) * (exp(-Tfinal) * u_init( xG2 ) - u_num(xG2,i,U,x)) * (exp(-Tfinal) * u_init( xG2 ) - u_num(xG2,i,U,x));
+    ERR += 1/(4*double(N)*double(N)) * (exp(-Tfinal) * u_init( xG1 ) - u_num(xG1,i,U,x)) * (exp(-Tfinal) * u_init( xG1 ) - u_num(xG1,i,U,x));
+    ERR += 1/(4*double(N)*double(N)) * (exp(-Tfinal) * u_init( xG2 ) - u_num(xG2,i,U,x)) * (exp(-Tfinal) * u_init( xG2 ) - u_num(xG2,i,U,x));
   }
   std::cout<< "Erreur = " << dx << "\t" <<  sqrt(ERR)<<std::endl;
    
