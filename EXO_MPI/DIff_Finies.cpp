@@ -4,36 +4,75 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
-#include <math.h>
+#include <cmath>
 
+typedef double (* SolCondition)(const double& x, const int& K,const double& T);
 
-double u_init(const double& x){
+double SolSinus(const double& x,const int& K,const double& T){
 
-  return sin(M_PI*x);
+  if (T==0) return sin(K*M_PI*x);
 
-}
-
-double u_num(const double& l,const int& i, const double* const U,const double* const x){
-  std::cout << "i = " << i << std::endl;
-  std::cout << "U[i] = " << U[i] << "\t U[i+1] = " << U[i+1] << "\t x[i] = " << x[i]<< "\t x[i+1] = " << x[i+1] << std::endl;
-  return (U[i+1]-U[i])*(l-x[i])/(x[i+1]-x[i]) + U[i];
-
-}
-
+  else return exp(-T)*sin(K*M_PI*x);
     
 
+}
+
+
+
+void File_writting(const int& k,const double* const U, const double* const x,const int& N){
+  std::stringstream mystream;
+  mystream<<"Chal"<<k<<".dat";
+  
+  std::ofstream File( mystream.str(), std::ofstream::out );
+  for(int i=0;i<=N;i++){      
+    File <<x[i]<< "\t" << U[i]<<'\n';
+  }   
+  File.close();
+
+}
+
+void Error(const int& N,const double* const U,const double* const Mesh,const int& Tfinal,const int& K,SolCondition Solution){
+  double ERR=0;
+  double xG1,xG2;
+  double step = Mesh[1]-Mesh[0];
+  for(int i = 0; i < N ; i++) {  
+
+    xG1=step*(-1/sqrt(3)+1)/2+Mesh[i];
+    xG2=step*(+1/sqrt(3)+1)/2+Mesh[i];
+  
+    ERR+=1/(4*double(N)*double(N)) * ( Solution( xG1,K,Tfinal ) - (U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]) * ( Solution( xG1,K,Tfinal ) -(U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]);
+    ERR+=1/(4*double(N)*double(N)) * ( Solution( xG2,K,Tfinal ) - (U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]) * ( Solution( xG2,K,Tfinal ) -(U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]);
+  }
+  std::cout<<"Erreur="<<step<<"\t"<<sqrt(ERR)<<std::endl;
+
+}
+			       
+
+void Error_ev(const int& N,const double* const U,const double* const Mesh,const int& K,const int& Tfinal,const int& dt){
+  double step=Mesh[1]-Mesh[0];
+  double Normesqr_U0=0,vp;
+  for (int i=0; i<=N ;i++){
+    Normesqr_U0+=step*U[i]*U[i];
+  }
+  vp=2/(step*step)*(cos(K*M_PI*step)-1);
+  std::cout<<"Erreur_vp="<<step<<"\t"<<pow( 1+ dt*vp -exp(-Tfinal),N)*sqrt(Normesqr_U0)<<std::endl;
+  
+}
 int main (int argc, char *argv[]){
-  int i,j,N;
+  int i,j,N,K,kprint;
   double dt=0,Tfinal,dx,l;
 
-  if (argc !=3 ) {
-    std::cerr << "usage is : " << argv[0] << " <N=mesh sise> <t=final time>"
+  if (argc != 5) {
+    std::cerr << "usage is : " << argv[0] << " <N=mesh size> <t=final time> <K=integer> <kprint=print step>"
 	      << std::endl;
     return 0;
   }
   else {
+  
     N=std::atoi(argv[1]); 
-    Tfinal=std::atof(argv[2]); 
+    Tfinal=std::atof(argv[2]);
+    K=std::atoi(argv[3]);
+    kprint=std::atoi(argv[4]);
  }
   
 
@@ -41,12 +80,10 @@ int main (int argc, char *argv[]){
   
   dx=1./double(N);
   dt = 0.4 * dx * dx;
-  //  T=1/dt;
   
   for(i=0;i<=N;i++){
     x[i]= i*dx;
-    U[ i ] = u_init(x[i]); 
-    //Uold[i]=1;
+    U[ i ] = SolSinus(x[i],K,0); 
   }
 
   std::cout << "x = " ;
@@ -57,72 +94,44 @@ int main (int argc, char *argv[]){
   double t = 0.;
   double dtloc = 0.;
   int kT = 0;
+  double ß;
+  double Ind=0;
   std::cout << "dt = " << dt << std::endl;
+
   while( t < Tfinal ) {
     dtloc = dt;
     if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
     U[0]=0;
     U[N]=0;
-    //Uold[0]=0;
-    //Uold[N]=0;    
-	
+
+
+ 
     for(i=1;i<N;i++){
-	
-      UTemp[i]=U[i]+ dt / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
+      UTemp[i]=U[i]+ dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
     }
 
-
-    std::cout<<"t=" << t <<std::endl;
-
-    
-    for(i=1;i<N;i++){
-      // std::cout<< "Vp*U =" << M_PI*M_PI*U[i] <<"\t"<< "Mat_Lap*U ="<<-(UTemp[i]-U[i])/dt<<std::endl ;	
-    }
     for(i=1;i<N;i++){
       U[i]=UTemp[i];	
     }
 
+
+    if (kT % kprint==0){
+      File_writting(Ind,U,x,N);
+      Ind++;
+    }
+
     t+=dtloc;
-    std::cout << "kT = " << kT << "\t U[N] = " << U[N] << std::endl;
-
-    std::stringstream mystream;
-    mystream<<"Chal"<<kT<<".dat";
-   
-    std::ofstream File( mystream.str(), std::ofstream::out );
-    std::cout << "mystream.str() = " << mystream.str() << std::endl;
-    //File.open(mystream.str());
-    for(i=0;i<=N;i++){      
-      File <<x[i]<< "\t" << U[i]<<'\n';
-    }   
-    File.close();
     kT++;
-  }
-  
-  double ERR = 0.;
-
-  std::cout << "U = " ;
-  for( i = 0; i <= N; i++)
-    std::cout << U[i] << "\t";
-  std::cout << std::endl;
-  
-  for( i = 0; i < N ; i++) {
-    double xG1,xG2;
-
-    xG1=(x[i+1]-x[i])*(-1/sqrt(3)+1)/2+x[i];
-    xG2=(x[i+1]-x[i])*(+1/sqrt(3)+1)/2+x[i];
     
-	 
-    //std::cout<<"x[i]:"<<x[i]<<"\t"<<"x[i+1]:"<<x[i+1]<<std::endl;
-    //std::cout<<u_num(xG1,i,U,x)<<"\t"<<u_num(xG2,i,U,x)<<std::endl;
-    std::cout << "exp(-Tfinal) * u_init( xG1 ) = " << exp(-Tfinal) * u_init( xG1 ) << "\t u_num(xG1,i,U,x) = " << u_num(xG1,i,U,x) << std::endl;
-    ERR += 1/(4*double(N)*double(N)) * (exp(-Tfinal) * u_init( xG1 ) - u_num(xG1,i,U,x)) * (exp(-Tfinal) * u_init( xG1 ) - u_num(xG1,i,U,x));
-    ERR += 1/(4*double(N)*double(N)) * (exp(-Tfinal) * u_init( xG2 ) - u_num(xG2,i,U,x)) * (exp(-Tfinal) * u_init( xG2 ) - u_num(xG2,i,U,x));
   }
-  std::cout<< "Erreur = " << dx << "\t" <<  sqrt(ERR)<<std::endl;
-   
-  std::ofstream File( "ChakExact.dat", std::ofstream::out );
+
+
+  Error(N,U,x,Tfinal,K,SolSinus);
+  Error_ev(N,U,x,K,Tfinal,dt);
+  
+   std::ofstream File( "ChalExact.dat", std::ofstream::out );
   for(i=0;i<=N;i++){      
-    File <<x[i]<< "\t" << exp(-Tfinal) * u_init( x[i] )<<'\n';
+    File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal )<<'\n';
   }   
   File.close();
 
