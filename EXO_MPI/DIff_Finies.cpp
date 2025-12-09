@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string>
 #include <cmath>
+#include <mpi.h>
 
 typedef double (* SolCondition)(const double& x, const int& K,const double& T);
 
@@ -75,7 +76,12 @@ int main (int argc, char *argv[]){
     kprint=std::atoi(argv[4]);
  }
   
-
+  int nb_procs,rang;
+  int etiquette=100;
+  MPI_Init(&argc,&argv);
+  MPI_Comm_size(MPI_COMM_WORLD,&nb_procs);
+  MPI_Comm_rank(MPI_COMM_WORLD,&rang);
+  
   double U[N+1],UTemp[N+1],x[N+1];
   
   dx=1./double(N);
@@ -98,6 +104,29 @@ int main (int argc, char *argv[]){
   double Ind=0;
   std::cout << "dt = " << dt << std::endl;
 
+
+  int Q,r,debut,fin;
+  
+  Q = N / nb_procs;
+  r = N - nb_procs*Q;
+
+  if (r != 0){
+    if (rang < r){
+      debut = rang * (Q+1);
+      fin = debut + Q + 1;
+    }
+    else{
+      debut = rang * Q + r;
+      if (debut + Q >= N) fin = N;
+      if (debut+Q < N) fin = debut + Q ;
+    }
+  }
+  else {
+    debut=rang*Q;
+    fin=debut+Q;
+  }
+  if (rang==0) debut = 1;
+    
   while( t < Tfinal ) {
     dtloc = dt;
     if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
@@ -106,7 +135,7 @@ int main (int argc, char *argv[]){
 
 
  
-    for(i=1;i<N;i++){
+    for(i=debut;i<fin;i++){
       UTemp[i]=U[i]+ dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
     }
 
@@ -122,6 +151,8 @@ int main (int argc, char *argv[]){
 
     t+=dtloc;
     kT++;
+
+    MPI_Barrier(MPI_COMM_WORLD);
     
   }
 
@@ -135,7 +166,7 @@ int main (int argc, char *argv[]){
   }   
   File.close();
 
-  
+  MPI_Finalize();
   return 0;
 }
 
