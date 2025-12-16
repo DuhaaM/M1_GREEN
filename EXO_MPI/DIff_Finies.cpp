@@ -62,6 +62,7 @@ void Error_ev(const int& N,const double* const U,const double* const Mesh,const 
 int main (int argc, char *argv[]){
   int i,j,N,K,kprint;
   double dt=0,Tfinal,dx,l;
+  double Ufinal[N+1];
 
   if (argc != 5) {
     std::cerr << "usage is : " << argv[0] << " <N=mesh size> <t=final time> <K=integer> <kprint=print step>"
@@ -82,90 +83,148 @@ int main (int argc, char *argv[]){
   MPI_Comm_size(MPI_COMM_WORLD,&nb_procs);
   MPI_Comm_rank(MPI_COMM_WORLD,&rang);
   
-  double U[N+1],UTemp[N+1],x[N+1];
   
   dx=1./double(N);
   dt = 0.4 * dx * dx;
+
+  double x[N+1];
+  for (i=0;i<=N;i++) x[i]=i*dx;
   
-  for(i=0;i<=N;i++){
-    x[i]= i*dx;
-    U[ i ] = SolSinus(x[i],K,0); 
+  int Q,r,debut,fin;
+  
+  Q = (N+1) / nb_procs;
+  r = (N+1) % nb_procs;
+  
+  if (r != 0){
+    if (rang < r){
+      debut = rang * (Q+1);
+      fin = (rang+1)*Q+1;
+     
+    }
+    else{
+      debut = rang * Q + r;
+      if (debut + Q >= N) fin = N+1;
+      if (debut+Q < N) fin = r+ Q * (rang+1) ;
+    }
+  }
+  else {
+    debut=rang*(Q+1);
+    fin=(rang+1)*Q;
   }
 
-  std::cout << "x = " ;
-  for( i = 0; i <= N; i++)
-    std::cout << x[i] << "\t";
+
+
+
+  int elem_recus[nb_procs],deplacement[nb_procs];
+  
+  if (rang==0){
+    elem_recus[0]=Q;
+    deplacement[0]=0;
+    if(r > 0) elem_recus[0]++;
+    for(j=1;j<nb_procs;j++){
+      deplacement[j]=deplacement[j-1]+elem_recus[j-1];
+      elem_recus[j]=Q;
+      if (j < r) elem_recus[j]++;
+    }
+  }
+
+  int Nproc=fin-debut;
+  double U[Nproc],UTemp[Nproc];
+  int s=0;
+
+  for (i=debut;i<=fin;i++){
+    U[s] = SolSinus(x[i],K,0);
+    s++;
+  }
+
+
+
+  for( i = 0; i <Nproc; i++){
+    std::cout << U[i] << "\t"<<rang<<std::endl;
+  }
   std::cout << std::endl;
 
   double t = 0.;
   double dtloc = 0.;
   int kT = 0;
-  double ß;
+  double tmp;
   double Ind=0;
+  double Send1,Send2,Recv1,Recv2;
   std::cout << "dt = " << dt << std::endl;
 
-
-  int Q,r,debut,fin;
-  
-  Q = N / nb_procs;
-  r = N - nb_procs*Q;
-
-  if (r != 0){
-    if (rang < r){
-      debut = rang * (Q+1);
-      fin = debut + Q + 1;
-    }
-    else{
-      debut = rang * Q + r;
-      if (debut + Q >= N) fin = N;
-      if (debut+Q < N) fin = debut + Q ;
-    }
-  }
-  else {
-    debut=rang*Q;
-    fin=debut+Q;
-  }
-  if (rang==0) debut = 1;
     
   while( t < Tfinal ) {
     dtloc = dt;
     if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
-    U[0]=0;
-    U[N]=0;
+    if (rang==0) U[0]=0;
+    if (rang == nb_procs-1)U[Nproc-1]=0;
+    if (rang==0) UTemp[0]=0;
+    if (rang == nb_procs-1)UTemp[Nproc-1]=0;
 
 
  
-    for(i=debut;i<fin;i++){
+    for(i=1;i<Nproc-1;i++){
       UTemp[i]=U[i]+ dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
     }
+    Send1=U[Nproc-1];
+    Send2=U[0];
+      
+    if (rang != nb_procs-1){
+	
+      MPI_Sendrecv(&Send1,1,MPI_DOUBLE,rang+1,etiquette,&Recv1,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+      UTemp[Nproc-1]=U[Nproc-1]+ dtloc / ( dx * dx ) * ( Recv1 - 2*U[Nproc-1] + U[Nproc-2] );
+    }
 
-    for(i=1;i<N;i++){
+    if ( rang != 0){
+      
+      MPI_Sendrecv(&Send2,1,MPI_DOUBLE,rang-1,etiquette,&Recv2,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+      UTemp[0]=U[0] +dtloc / (dx*dx) * ( U[1] -2*U[0] + Recv2);
+
+    }
+	  
+    
+     
+    
+    for(i=1;i<Nproc-1;i++){
       U[i]=UTemp[i];	
     }
 
+
+
+
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Gatherv(U,Nproc,MPI_DOUBLE,Ufinal,elem_recus,deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
     if (kT % kprint==0){
       File_writting(Ind,U,x,N);
       Ind++;
     }
-
+    
     t+=dtloc;
     kT++;
 
-    MPI_Barrier(MPI_COMM_WORLD);
     
   }
 
 
-  Error(N,U,x,Tfinal,K,SolSinus);
-  Error_ev(N,U,x,K,Tfinal,dt);
-  
-   std::ofstream File( "ChalExact.dat", std::ofstream::out );
-  for(i=0;i<=N;i++){      
-    File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal )<<'\n';
-  }   
-  File.close();
 
+
+
+  if (rang == 0){
+    Error(N,Ufinal,x,Tfinal,K,SolSinus);
+    Error_ev(N,Ufinal,x,K,Tfinal,dt);
+  
+    for (i=0;i<=N;i++){
+      std::cout<<Ufinal[i]<<std::endl;
+    }
+    std::ofstream File( "ChalExact.dat", std::ofstream::out );
+    for(i=0;i<=N;i++){      
+      File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal )<<'\n';
+    }   
+    File.close();
+  }
+  
   MPI_Finalize();
   return 0;
 }
