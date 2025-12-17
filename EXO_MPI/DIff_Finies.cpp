@@ -13,7 +13,7 @@ double SolSinus(const double& x,const int& K,const double& T){
 
   if (T==0) return sin(K*M_PI*x);
 
-  else return exp(-T)*sin(K*M_PI*x);
+  else return exp(-T*M_PI*M_PI)*sin(K*M_PI*x);
     
 
 }
@@ -59,6 +59,8 @@ void Error_ev(const int& N,const double* const U,const double* const Mesh,const 
   std::cout<<"Erreur_vp="<<step<<"\t"<<pow( 1+ dt*vp -exp(-Tfinal),N)*sqrt(Normesqr_U0)<<std::endl;
   
 }
+
+
 int main (int argc, char *argv[]){
   int i,j,N,K,kprint;
   double dt=0,Tfinal,dx,l;
@@ -156,8 +158,6 @@ int main (int argc, char *argv[]){
   while( t < Tfinal ) {
     dtloc = dt;
     if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
-    if (rang==0) U[0]=0;
-    if (rang == nb_procs-1)U[Nproc-1]=0;
     if (rang==0) UTemp[0]=0;
     if (rang == nb_procs-1)UTemp[Nproc-1]=0;
 
@@ -183,32 +183,23 @@ int main (int argc, char *argv[]){
     }
 	  
     
-     
-    
-    for(i=1;i<Nproc-1;i++){
+    for(i=0;i<Nproc;i++){
       U[i]=UTemp[i];	
     }
-
-
-
 
     
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Gatherv(U,Nproc,MPI_DOUBLE,Ufinal,elem_recus,deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
     if (kT % kprint==0){
-      File_writting(Ind,U,x,N);
+      File_writting(Ind,Ufinal,x,N);
       Ind++;
     }
     
     t+=dtloc;
     kT++;
 
-    
   }
-
-
-
 
 
   if (rang == 0){
