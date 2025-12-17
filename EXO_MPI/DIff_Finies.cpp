@@ -13,7 +13,7 @@ double SolSinus(const double& x,const int& K,const double& T){
 
   if (T==0) return sin(K*M_PI*x);
 
-  else return exp(-T*M_PI*M_PI)*sin(K*M_PI*x);
+  else return exp(-T*K*M_PI*M_PI)*sin(K*M_PI*x);
     
 
 }
@@ -191,11 +191,12 @@ int main (int argc, char *argv[]){
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Gatherv(U,Nproc,MPI_DOUBLE,Ufinal,elem_recus,deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
-    if (kT % kprint==0){
-      File_writting(Ind,Ufinal,x,N);
-      Ind++;
+    if (rang == 0){
+      if (kT % kprint==0){
+	File_writting(Ind,Ufinal,x,N);
+	Ind++;
+      }
     }
-    
     t+=dtloc;
     kT++;
 
