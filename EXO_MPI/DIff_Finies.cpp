@@ -44,19 +44,19 @@ void Error(const int& N,const double* const U,const double* const Mesh,const int
     ERR+=1/(4*double(N)*double(N)) * ( Solution( xG1,K,Tfinal ) - (U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]) * ( Solution( xG1,K,Tfinal ) -(U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]);
     ERR+=1/(4*double(N)*double(N)) * ( Solution( xG2,K,Tfinal ) - (U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]) * ( Solution( xG2,K,Tfinal ) -(U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]);
   }
-  std::cout<<"Erreur="<<step<<"\t"<<sqrt(ERR)<<std::endl;
+  std::cout<<"Erreur="<<sqrt(ERR)<<std::endl;
 
 }
 			       
 
-void Error_ev(const int& N,const double* const U,const double* const Mesh,const int& K,const int& Tfinal,const int& dt){
+void Error_ev(const int& N,const double* const U,const double* const Mesh,const int& K,const int& Tfinal,const int& dt, SolCondition Solution){
   double step=Mesh[1]-Mesh[0];
   double Normesqr_U0=0,vp;
   for (int i=0; i<=N ;i++){
-    Normesqr_U0+=step*U[i]*U[i];
+    Normesqr_U0+=step*Solution(Mesh[i],K,0)*Solution(Mesh[i],K,0);
   }
   vp=2/(step*step)*(cos(K*M_PI*step)-1);
-  std::cout<<"Erreur_vp="<<step<<"\t"<<pow( 1+ dt*vp -exp(-Tfinal),N)*sqrt(Normesqr_U0)<<std::endl;
+  std::cout<<"Erreur_vp="<<pow( 1+ dt*vp -exp(-Tfinal),N)*sqrt(Normesqr_U0)<<std::endl;
   
 }
 
@@ -118,6 +118,8 @@ int main (int argc, char *argv[]){
 
 
   int elem_recus[nb_procs],deplacement[nb_procs];
+
+
   
   if (rang==0){
     elem_recus[0]=Q;
@@ -140,19 +142,12 @@ int main (int argc, char *argv[]){
   }
 
 
-
-  for( i = 0; i <Nproc; i++){
-    std::cout << U[i] << "\t"<<rang<<std::endl;
-  }
-  std::cout << std::endl;
-
   double t = 0.;
   double dtloc = 0.;
   int kT = 0;
   double tmp;
   double Ind=0;
   double Send1,Send2,Recv1,Recv2;
-  std::cout << "dt = " << dt << std::endl;
 
     
   while( t < Tfinal ) {
@@ -205,11 +200,8 @@ int main (int argc, char *argv[]){
 
   if (rang == 0){
     Error(N,Ufinal,x,Tfinal,K,SolSinus);
-    Error_ev(N,Ufinal,x,K,Tfinal,dt);
+    Error_ev(N,Ufinal,x,K,Tfinal,dt,SolSinus);
   
-    for (i=0;i<=N;i++){
-      std::cout<<Ufinal[i]<<std::endl;
-    }
     std::ofstream File( "ChalExact.dat", std::ofstream::out );
     for(i=0;i<=N;i++){      
       File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal )<<'\n';
