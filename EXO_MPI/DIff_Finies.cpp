@@ -11,9 +11,7 @@ typedef double (* SolCondition)(const double& x, const int& K,const double& T);
 
 double SolSinus(const double& x,const int& K,const double& T){
 
-  if (T==0) return sin(K*M_PI*x);
-
-  else return exp(-T*K*M_PI*M_PI)*sin(K*M_PI*x);
+   return exp(-T*K*M_PI*M_PI)*sin(K*M_PI*x);
     
 
 }
@@ -65,6 +63,7 @@ int main (int argc, char *argv[]){
   int i,j,N,K,kprint;
   double dt=0,Tfinal,dx,l;
   double Ufinal[N+1];
+  double temps_debut,temps_fin;
 
   if (argc != 5) {
     std::cerr << "usage is : " << argv[0] << " <N=mesh size> <t=final time> <K=integer> <kprint=print step>"
@@ -84,7 +83,8 @@ int main (int argc, char *argv[]){
   MPI_Init(&argc,&argv);
   MPI_Comm_size(MPI_COMM_WORLD,&nb_procs);
   MPI_Comm_rank(MPI_COMM_WORLD,&rang);
-  
+
+  temps_debut=MPI_Wtime();
   
   dx=1./double(N);
   dt = 0.4 * dx * dx;
@@ -201,7 +201,9 @@ int main (int argc, char *argv[]){
   if (rang == 0){
     Error(N,Ufinal,x,Tfinal,K,SolSinus);
     Error_ev(N,Ufinal,x,K,Tfinal,dt,SolSinus);
-  
+    temps_fin = MPI_Wtime();
+
+    std::cout<<"Temps="<<temps_fin-temps_debut<<std::endl;
     std::ofstream File( "ChalExact.dat", std::ofstream::out );
     for(i=0;i<=N;i++){      
       File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal )<<'\n';
