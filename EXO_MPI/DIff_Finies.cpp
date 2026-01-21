@@ -97,22 +97,11 @@ int main (int argc, char *argv[]){
   Q = (N+1) / nb_procs;
   r = (N+1) % nb_procs;
   
-  if (r != 0){
-    if (rang < r){
-      debut = rang * (Q+1);
-      fin = (rang+1)*Q+1;
-     
-    }
-    else{
-      debut = rang * Q + r;
-      if (debut + Q >= N) fin = N+1;
-      if (debut+Q < N) fin = r+ Q * (rang+1) ;
-    }
-  }
-  else {
-    debut=rang*(Q+1);
-    fin=(rang+1)*Q;
-  }
+  debut= rang*(Q+1);
+  fin = (rang+1) *Q +rang;
+
+  if (rang <r )  fin++; 
+  if (rang ==0) fin--; // On le fait en deux étape pour couvrir le cas r=0
 
 
 
@@ -122,9 +111,8 @@ int main (int argc, char *argv[]){
 
   
   if (rang==0){
-    elem_recus[0]=Q;
+    elem_recus[0]=Q+1;
     deplacement[0]=0;
-    if(r > 0) elem_recus[0]++;
     for(j=1;j<nb_procs;j++){
       deplacement[j]=deplacement[j-1]+elem_recus[j-1];
       elem_recus[j]=Q;
@@ -133,6 +121,8 @@ int main (int argc, char *argv[]){
   }
 
   int Nproc=fin-debut;
+  if(rang==0) Nproc++;
+  std::cout<<"rang="<<rang<<"Nprox=="<<Nproc<<std::endl;
   double U[Nproc],UTemp[Nproc];
   int s=0;
 
@@ -152,8 +142,7 @@ int main (int argc, char *argv[]){
   while( t < Tfinal ) {
     dtloc = dt;
     if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
-    if (rang==0) UTemp[0]=0;
-    if (rang == nb_procs-1)UTemp[Nproc-1]=0;
+
 
 
  
