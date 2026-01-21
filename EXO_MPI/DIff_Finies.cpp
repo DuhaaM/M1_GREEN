@@ -111,7 +111,8 @@ int main (int argc, char *argv[]){
 
   
   if (rang==0){
-    elem_recus[0]=Q+1;
+    elem_recus[0]=Q;
+    if (r > 0) elem_recus[0]++;
     deplacement[0]=0;
     for(j=1;j<nb_procs;j++){
       deplacement[j]=deplacement[j-1]+elem_recus[j-1];
@@ -122,7 +123,6 @@ int main (int argc, char *argv[]){
 
   int Nproc=fin-debut;
   if(rang==0) Nproc++;
-  std::cout<<"rang="<<rang<<"Nprox=="<<Nproc<<std::endl;
   double U[Nproc],UTemp[Nproc];
   int s=0;
 
@@ -184,7 +184,6 @@ int main (int argc, char *argv[]){
     kT++;
 
   }
-
 
   if (rang == 0){
     Error(N,Ufinal,x,Tfinal,K,SolSinus);
