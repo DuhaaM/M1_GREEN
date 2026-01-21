@@ -17,7 +17,6 @@ double SolSinus(const double& x,const int& K,const double& T){
 }
 
 
-
 void File_writting(const int& k,const double* const U, const double* const x,const int& N){
   std::stringstream mystream;
   mystream<<"Chal"<<k<<".dat";
@@ -49,12 +48,13 @@ void Error(const int& N,const double* const U,const double* const Mesh,const int
 
 void Error_ev(const int& N,const double* const U,const double* const Mesh,const int& K,const int& Tfinal,const int& dt, SolCondition Solution){
   double step=Mesh[1]-Mesh[0];
-  double Normesqr_U0=0,vp;
+  double Normesqr_U0=0,vp,Err;
   for (int i=0; i<=N ;i++){
     Normesqr_U0+=step*Solution(Mesh[i],K,0)*Solution(Mesh[i],K,0);
   }
-  vp=2/(step*step)*(cos(K*M_PI*step)-1);
-  std::cout<<"Erreur_vp="<<pow( 1+ dt*vp -exp(-Tfinal),N)*sqrt(Normesqr_U0)<<std::endl;
+  vp=2*dt/(step*step)*(cos(K*M_PI*step)-1);
+  Err=abs(pow(vp,N) -exp(-Tfinal*K*M_PI*M_PI));
+  std::cout<<"Erreur_vp="<<sqrt(Normesqr_U0)*Err<<std::endl;
   
 }
 
@@ -86,7 +86,7 @@ int main (int argc, char *argv[]){
 
   temps_debut=MPI_Wtime();
   
-  dx=1./double(N);
+  dx=Tfinal/double(N);
   dt = 0.4 * dx * dx;
 
   double x[N+1];
@@ -143,9 +143,8 @@ int main (int argc, char *argv[]){
 
 
   double t = 0.;
-  double dtloc = 0.;
+  double dtloc;
   int kT = 0;
-  double tmp;
   double Ind=0;
   double Send1,Send2,Recv1,Recv2;
 
@@ -159,7 +158,7 @@ int main (int argc, char *argv[]){
 
  
     for(i=1;i<Nproc-1;i++){
-      UTemp[i]=U[i]+ dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
+      UTemp[i]=U[i]+ K*dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
     }
     Send1=U[Nproc-1];
     Send2=U[0];
@@ -186,12 +185,12 @@ int main (int argc, char *argv[]){
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Gatherv(U,Nproc,MPI_DOUBLE,Ufinal,elem_recus,deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
-    if (rang == 0){
+    /*if (rang == 0){
       if (kT % kprint==0){
 	File_writting(Ind,Ufinal,x,N);
 	Ind++;
       }
-    }
+    }*/
     t+=dtloc;
     kT++;
 
