@@ -184,18 +184,22 @@ int main (int argc, char *argv[]){
     kT++;
 
   }
+  
+  if( rang == 1) Error_ev(N,Ufinal,x,K,Tfinal,dt,SolSinus);
 
   if (rang == 0){
     Error(N,Ufinal,x,Tfinal,K,SolSinus);
-    Error_ev(N,Ufinal,x,K,Tfinal,dt,SolSinus);
-    temps_fin = MPI_Wtime();
 
-    std::cout<<"Temps="<<temps_fin-temps_debut<<std::endl;
     std::ofstream File( "ChalExact.dat", std::ofstream::out );
     for(i=0;i<=N;i++){      
       File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal )<<'\n';
     }   
     File.close();
+  }
+
+  if (rang ==0) {
+  temps_fin = MPI_Wtime();
+  std::cout<<"Temps="<<temps_fin-temps_debut<<std::endl;
   }
   
   MPI_Finalize();
