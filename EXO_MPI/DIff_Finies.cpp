@@ -62,7 +62,6 @@ void Error_ev(const int& N,const double* const U,const double* const Mesh,const 
 int main (int argc, char *argv[]){
   int i,j,N,K,kprint;
   double dt=0,Tfinal,dx,l;
-  double Ufinal[N+1];
   double temps_debut,temps_fin;
 
   if (argc != 5) {
@@ -123,6 +122,8 @@ int main (int argc, char *argv[]){
 
   int Nproc=fin-debut;
   if(rang==0) Nproc++;
+
+
   double U[Nproc],UTemp[Nproc];
   int s=0;
 
@@ -131,28 +132,48 @@ int main (int argc, char *argv[]){
     s++;
   }
 
-
+  double Ufinal[N+1];
   double t = 0.;
   double dtloc;
   int kT = 0;
   double Ind=0;
   double Send1,Send2,Recv1,Recv2;
+  MPI_Request request[4];
+  int nb_req;
 
     
   while( t < Tfinal ) {
     dtloc = dt;
     if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
 
+    nb_req = 0;
 
+    if (rang != nb_procs-1) MPI_Irecv(&Recv2,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+    if (rang != 0)MPI_Irecv(&Recv1,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
 
- 
+    Send1=U[Nproc-1];
+    Send2=U[0];
+
+        
     for(i=1;i<Nproc-1;i++){
       UTemp[i]=U[i]+ K*dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
     }
-    Send1=U[Nproc-1];
-    Send2=U[0];
+    
+    if (rang != nb_procs-1) MPI_Isend(&Send1,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+    if (rang != 0) MPI_Isend(&Send2,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+
+
+
+    MPI_Waitall(nb_req,request,MPI_STATUS_IGNORE);
+    
+    if (rang != 0) UTemp[0]=U[0] +dtloc / (dx*dx) * ( U[1] -2*U[0] + Recv1);
+    else UTemp[0]=0;
+
+        
+    if (rang != nb_procs-1)UTemp[Nproc-1]=U[Nproc-1]+ dtloc / ( dx * dx ) * (Recv2 - 2*U[Nproc-1] + U[Nproc-2] );
+    else UTemp[Nproc-1]=0;
       
-    if (rang != nb_procs-1){
+    /* if (rang != nb_procs-1){
 	
       MPI_Sendrecv(&Send1,1,MPI_DOUBLE,rang+1,etiquette,&Recv1,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       UTemp[Nproc-1]=U[Nproc-1]+ dtloc / ( dx * dx ) * ( Recv1 - 2*U[Nproc-1] + U[Nproc-2] );
@@ -163,21 +184,21 @@ int main (int argc, char *argv[]){
       MPI_Sendrecv(&Send2,1,MPI_DOUBLE,rang-1,etiquette,&Recv2,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       UTemp[0]=U[0] +dtloc / (dx*dx) * ( U[1] -2*U[0] + Recv2);
 
-    }
+      }*/
 	  
-    
+
+            
     for(i=0;i<Nproc;i++){
       U[i]=UTemp[i];	
     }
 
     
-    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Gatherv(U,Nproc,MPI_DOUBLE,Ufinal,elem_recus,deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);
 
     /*if (rang == 0){
       if (kT % kprint==0){
-	File_writting(Ind,Ufinal,x,N);
-	Ind++;
+        File_writting(Ind,Ufinal,x,N);
+        Ind++;
       }
     }*/
     t+=dtloc;
