@@ -178,13 +178,15 @@ int main (int argc, char *argv[]){
       MPI_Sendrecv(&Send1,1,MPI_DOUBLE,rang+1,etiquette,&Recv1,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       UTemp[Nproc-1]=U[Nproc-1]+ dtloc / ( dx * dx ) * ( Recv1 - 2*U[Nproc-1] + U[Nproc-2] );
     }
+    else UTemp[Nproc-1] = 0;
 
     if ( rang != 0){
       
       MPI_Sendrecv(&Send2,1,MPI_DOUBLE,rang-1,etiquette,&Recv2,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
       UTemp[0]=U[0] +dtloc / (dx*dx) * ( U[1] -2*U[0] + Recv2);
 
-      }*/
+      }
+      else UTemp[0]=0;*/
 	  
 
             
