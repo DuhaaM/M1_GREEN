@@ -13,10 +13,10 @@
 
 
 
-typedef double (* SolCondition)(const double& x, const int& K,const double& T);
-double SolSinus(const double& x,const int& K,const double& T){
+typedef double (* SolCondition)(const double& x, const int& K,const double& T,const double& L);
+double SolSinus(const double& x,const int& K,const double& T,const double& L){
 
-   return exp(-T*K*M_PI*M_PI)*sin(K*M_PI*x);
+   return exp(-T*K*K*M_PI*M_PI/L/L)*sin(K*M_PI*x/L);
     
 
 }
@@ -33,10 +33,12 @@ private :
   int nb_procs;
   int rang;
   int Nproc_;
+  std::vector<double> U_;
+  
 
   
 public :
-  Cut(const int& N,const int& nbp) : nb_procs(nbp) {
+  Cut(const int& N,const int& nbp,const int& rank) : nb_procs(nbp), rang(rank) {
     Q_ = (N + 1) / nbp;
     r_ = (N + 1) % nbp;
     elem_recus_.resize(nbp);
@@ -57,6 +59,7 @@ public :
     }
   }
 
+    
 
   void setDebut(const int& rang){ debut_= rang*Q_ +std::min(rang,r_);}
  
@@ -64,7 +67,15 @@ public :
 
   void computeNproc(const int& rang){
     Nproc_ = fin_-debut_+1;
+  }
 
+  
+  void computeU(SolCondition Solution,const double& k, const double& L,const std::vector<double>&  mesh){
+    U_.reserve(Nproc_);
+      
+     for (int i=debut_;i<=fin_;i++){
+       U_.push_back( Solution(mesh[i],k,0,L));
+     }
   }
     
   int Q() const {return Q_;}
@@ -74,18 +85,20 @@ public :
   int debut() const { return debut_; }
   int fin()   const { return fin_; }
   int Nproc() const { return Nproc_; }
+  const std::vector<double>& U() const {return U_;}
 };
 
 
 
 
 
-std::vector<double> Mesh(const int& N,const int& Tfinal){
+std::vector<double> Mesh(const int& N,const double& L){
 
   std::vector<double> mesh;
-  double dx=Tfinal/double(N);
+  double dx=L/double(N);
   for (int i=0;i<=N;i++) mesh.push_back(i*dx);
   return mesh;
+
 
 }
 
@@ -109,7 +122,7 @@ void File_writting(const int& k,const double* const U, const std::vector<double>
 
 
 
-void Error(const int& N,const std::vector<double>& U,const std::vector<double>& Mesh,const double& Tfinal,const int& K,SolCondition Solution){
+void Error(const int& N,const std::vector<double>& U,const std::vector<double>& Mesh,const double& Tfinal,const int& K,const double& L,SolCondition Solution){
   double ERR=0;
   double xG1,xG2;
   double step = Mesh[1]-Mesh[0];
@@ -118,8 +131,8 @@ void Error(const int& N,const std::vector<double>& U,const std::vector<double>& 
     xG1=step*(-1/sqrt(3)+1)/2+Mesh[i];
     xG2=step*(+1/sqrt(3)+1)/2+Mesh[i];
   
-    ERR+=1/(4*double(N)*double(N)) * ( Solution( xG1,K,Tfinal ) - (U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]) * ( Solution( xG1,K,Tfinal ) -(U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]);
-    ERR+=1/(4*double(N)*double(N)) * ( Solution( xG2,K,Tfinal ) - (U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]) * ( Solution( xG2,K,Tfinal ) -(U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]);
+    ERR+=1/(4*double(N)*double(N)) * ( Solution( xG1,K,Tfinal,L ) - (U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]) * ( Solution( xG1,K,Tfinal,L ) -(U[i+1]-U[i])*(xG1-Mesh[i])/step + U[i]);
+    ERR+=1/(4*double(N)*double(N)) * ( Solution( xG2,K,Tfinal,L ) - (U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]) * ( Solution( xG2,K,Tfinal,L ) -(U[i+1]-U[i])*(xG2-Mesh[i])/step + U[i]);
   }
   std::cout<<"Erreur="<<sqrt(ERR)<<std::endl;
 
@@ -129,15 +142,15 @@ void Error(const int& N,const std::vector<double>& U,const std::vector<double>& 
 
 
 
-void Error_ev(const int& N,const std::vector<double>& U,const std::vector<double>& Mesh,const int& K,const double& Tfinal, SolCondition Solution){
-  double dt=Tfinal/double(N);
+void Error_ev(const int& N,const std::vector<double>& U,const std::vector<double>& Mesh,const int& K,const double& Tfinal,const double& L, SolCondition Solution){
+  double dt=0.4 * L * L / (N * N);
   double step=Mesh[1]-Mesh[0];
   double Normesqr_U0=0,vp,Err;
   for (int i=0; i<=N ;i++){
-    Normesqr_U0+=step*Solution(Mesh[i],K,0)*Solution(Mesh[i],K,0);
+    Normesqr_U0+=step*Solution(Mesh[i],K,0,L)*Solution(Mesh[i],K,0,L);
   }
   vp=2*dt/(step*step)*(cos(K*M_PI*step)-1);
-  Err=abs(pow(vp,N) -exp(-Tfinal*K*M_PI*M_PI));
+  Err=abs(pow(vp,N) -exp(-Tfinal*K*K*M_PI*M_PI/L/L));
   std::cout<<"Erreur_vp="<<sqrt(Normesqr_U0)*Err<<std::endl;
   
 }
@@ -152,38 +165,24 @@ void Error_ev(const int& N,const std::vector<double>& U,const std::vector<double
 
 
 
-std::vector<double> EulExp_Sendrecv(SolCondition Solution, Cut cut, const double& Tfinal,const int& k,const std::vector<double>& mesh,const int& rang,const int& nb_procs,const int& N ){
+std::vector<double> EulExp_Sendrecv(SolCondition Solution, Cut cut, const double& Tfinal,const int& k,const std::vector<double>& mesh,const int& rang,const int& nb_procs,const int& N,const double& L,const double& dtloc,const std::vector<double>& U ){
 
 
 
 
-  double dx=Tfinal/double(N);
-  double dt = 0.4 * dx * dx;
+  double dx=L/double(N);
   
   int Nproc=cut.Nproc();
-  std::vector<double> U, UTemp(Nproc);
-
-  for (int i=cut.debut();i<=cut.fin();i++){
-    U.push_back( Solution(mesh[i],k,0));
-  }
+  std::vector<double>  UTemp(Nproc);
 
 
   std::vector<int> deplacement(nb_procs), elem_recus(nb_procs);
   std::vector<double> Ufinal;
-  double t = 0.;
-  double dtloc;
-  int kT = 0;
-  double Ind=0;
   double Send1,Send2,Recv1,Recv2;
-
-    
-  while( t < Tfinal ) {
-    dtloc = dt;
-    if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
 
         
     for(int i=1;i<Nproc-1;i++){
-      UTemp[i]=U[i]+ k*dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
+      UTemp[i]=U[i]+ dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
     }
 
     int etiquette=100;
@@ -206,20 +205,8 @@ std::vector<double> EulExp_Sendrecv(SolCondition Solution, Cut cut, const double
       
     }
     else UTemp[0]=0;
-	  
-          
-    for(int i=0;i<Nproc;i++){
-      U[i]=UTemp[i];	
-    }
 
-
-
-    t+=dtloc;
-    kT++;
-  }
-
-
-  return U;
+  return UTemp;
 }
 
 
@@ -235,80 +222,58 @@ std::vector<double> EulExp_Sendrecv(SolCondition Solution, Cut cut, const double
 
 
 
-std::vector<double> EulExp_NoBlock(SolCondition Solution, Cut cut, const double& Tfinal,const int& k,const std::vector<double>& mesh,const int& rang,const int& nb_procs,const int& N ){
+std::vector<double> EulExp_NoBlock(SolCondition Solution, Cut cut, const double& Tfinal,const int& k,const std::vector<double>& mesh,const int& rang,const int& nb_procs,const int& N,const double& L,const double& dtloc,const std::vector<double>& U ){
 
 
 
 
-  double dx=Tfinal/double(N);
-  double dt = 0.4 * dx * dx;
+  double dx=L/double(N);
     
   int Nproc=cut.Nproc();
-  std::vector<double> U, UTemp(Nproc);
-
-  for (int i=cut.debut();i<=cut.fin();i++){
-    U.push_back( Solution(mesh[i],k,0));
-  }
+  std::vector<double> UTemp(Nproc);
 
 
-  std::vector<int> deplacement(nb_procs), elem_recus(nb_procs);
-  std::vector<double> Ufinal;
-  double t = 0.;
-  double dtloc;
-  int kT = 0;
-  double Ind=0;
   double Send1,Send2,Recv1,Recv2;
   MPI_Request request[4];
   int nb_req;
 
-    
-  while( t < Tfinal ) {
-    dtloc = dt;
-    if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
 
-
-    int etiquette=100;
-    
-    Send1=U[Nproc-1];
-    Send2=U[0];
-
-    
-    nb_req = 0;
-
-    if (rang != nb_procs-1) MPI_Irecv(&Recv2,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
-    if (rang != 0)MPI_Irecv(&Recv1,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
-
-    Send1=U[Nproc-1];
-    Send2=U[0];
-
+  int etiquette=100;
+  
+  Send1=U[Nproc-1];
+  Send2=U[0];
+  
+  
+  nb_req = 0;
+  
+  if (rang != nb_procs-1) MPI_Irecv(&Recv2,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+  if (rang != 0)MPI_Irecv(&Recv1,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+  
+  Send1=U[Nproc-1];
+  Send2=U[0];
+  
         
-    for(int i=1;i<Nproc-1;i++){
-      UTemp[i]=U[i]+ k*dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
-    }
-    
-    if (rang != nb_procs-1) MPI_Isend(&Send1,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
-    if (rang != 0) MPI_Isend(&Send2,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
-
-
-
-    MPI_Waitall(nb_req,request,MPI_STATUS_IGNORE);
-    
-    if (rang != 0) UTemp[0]=U[0] +dtloc / (dx*dx) * ( U[1] -2*U[0] + Recv1);
-    else UTemp[0]=0;
-
-        
-    if (rang != nb_procs-1)UTemp[Nproc-1]=U[Nproc-1]+ dtloc / ( dx * dx ) * (Recv2 - 2*U[Nproc-1] + U[Nproc-2] );
-    else UTemp[Nproc-1]=0;
-
-            
-    for(int i=0;i<Nproc;i++){
-      U[i]=UTemp[i];	
-    }
-    t+=dtloc;
-    kT++;
+  for(int i=1;i<Nproc-1;i++){
+    UTemp[i]=U[i]+ dtloc / ( dx * dx ) * ( U[i+1] - 2*U[i] + U[i-1] );
   }
+  
+  if (rang != nb_procs-1) MPI_Isend(&Send1,1,MPI_DOUBLE,rang+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+  if (rang != 0) MPI_Isend(&Send2,1,MPI_DOUBLE,rang-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+  
 
-  return U;
+
+  MPI_Waitall(nb_req,request,MPI_STATUS_IGNORE);
+  
+  if (rang != 0) UTemp[0]=U[0] +dtloc / (dx*dx) * ( U[1] -2*U[0] + Recv1);
+  else UTemp[0]=0;
+  
+  
+  if (rang != nb_procs-1)UTemp[Nproc-1]=U[Nproc-1]+ dtloc / ( dx * dx ) * (Recv2 - 2*U[Nproc-1] + U[Nproc-2] );
+  else UTemp[Nproc-1]=0;
+
+
+
+  return UTemp;
 }
 
 
@@ -322,11 +287,11 @@ std::vector<double> EulExp_NoBlock(SolCondition Solution, Cut cut, const double&
 
 int main (int argc, char *argv[]){
   int i,j,N,K,kprint,method;
-  double Tfinal;
+  double Tfinal,L;
   double temps_debut,temps_fin;
 
-  if (argc != 6) {
-    std::cerr << "usage is : " << argv[0] << " <N=mesh size> <t=final time> <K=integer> <kprint=print step> <Comm_Method : Non-Blocking = 1 or Sendrecv = 2 >"
+  if (argc != 7) {
+    std::cerr << "usage is : " << argv[0] << " <N=mesh size> <t=final time> <K=integer> <kprint=print step> <L=Upperbound> <Comm_Method : Non-Blocking = 1 or Sendrecv = 2 >"
 	      << std::endl;
     return 0;
   }
@@ -336,7 +301,8 @@ int main (int argc, char *argv[]){
     Tfinal=std::atof(argv[2]);
     K=std::atoi(argv[3]);
     kprint=std::atoi(argv[4]);
-    method=std::atoi(argv[5]);
+    L=std::atof(argv[5]);
+    method = std::atoi(argv[6]);
  }
 
   int nb_procs,rang;
@@ -347,33 +313,56 @@ int main (int argc, char *argv[]){
   temps_debut=MPI_Wtime();
   
 
-  std::vector<double> x=Mesh(N,Tfinal);
+  std::vector<double> x=Mesh(N,L);
 
-  Cut C1(N,nb_procs);
+  Cut C1(N,nb_procs,rang);
   C1.computeElemrecus();
   C1.computeDeplacement();
   C1.setDebut(rang);
   C1.setFin(rang);
   C1.computeNproc(rang);
+  C1.computeU(SolSinus,K,L,x);
   
   std::vector<double> Ufinal,U;
 
-  if(method == 1 ) U = EulExp_NoBlock(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N);
+  double t=0;
+  double dtloc;
+  int kT=0,Ind=0;
+
+  U=C1.U();
+      
+  while( t < Tfinal ) {
+    dtloc = 0.4*L*L/(double(N)*double(N));
+    if ( t + dtloc > Tfinal ) dtloc = Tfinal - t ;
 
 
-  if(method == 2) U = EulExp_Sendrecv(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N);
+    if(method == 1 ) U = EulExp_NoBlock(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N,L,dtloc,U);
+    
+    
+    if(method == 2) U = EulExp_Sendrecv(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N,L,dtloc,U);
 
-  if (rang == 0) Ufinal.resize(N+1);
-  MPI_Gatherv(U.data(),C1.Nproc(),MPI_DOUBLE,Ufinal.data(),C1.elem_recus().data(),C1.deplacement().data(),MPI_DOUBLE,0,MPI_COMM_WORLD);
+    if(kT % kprint == 0 or t==Tfinal){
+      if (rang == 0) Ufinal.resize(N+1);
+      MPI_Gatherv(U.data(),C1.Nproc(),MPI_DOUBLE,Ufinal.data(),C1.elem_recus().data(),C1.deplacement().data(),MPI_DOUBLE,0,MPI_COMM_WORLD);
+    }
 
-  
+    if (rang == 0 and kT % kprint==0){
+        File_writting(Ind,Ufinal.data(),x,N);
+        Ind++;
+    }
+
+    t+=dtloc;
+    kT++;
+    
+  } 
   if (rang == 0){
-    Error(N,Ufinal,x,Tfinal,K,SolSinus);
-    Error_ev(N,Ufinal,x,K,Tfinal,SolSinus);
+    Error(N,Ufinal,x,Tfinal,K,L,SolSinus);
+    Error_ev(N,Ufinal,x,K,Tfinal,L,SolSinus);
+    
 
     std::ofstream File( "ChalExact.dat", std::ofstream::out );
     for(i=0;i<=N;i++){      
-      File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal )<<'\n';
+      File <<x[i]<< "\t" <<  SolSinus( x[i],K,Tfinal,L )<<'\n';
     }   
     File.close();
   }
