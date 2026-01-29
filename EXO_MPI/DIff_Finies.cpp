@@ -129,7 +129,8 @@ void Error(const int& N,const std::vector<double>& U,const std::vector<double>& 
 
 
 
-void Error_ev(const int& N,const std::vector<double>& U,const std::vector<double>& Mesh,const int& K,const double& Tfinal,const int& dt, SolCondition Solution){
+void Error_ev(const int& N,const std::vector<double>& U,const std::vector<double>& Mesh,const int& K,const double& Tfinal, SolCondition Solution){
+  double dt=Tfinal/double(N);
   double step=Mesh[1]-Mesh[0];
   double Normesqr_U0=0,vp,Err;
   for (int i=0; i<=N ;i++){
@@ -211,18 +212,14 @@ std::vector<double> EulExp_Sendrecv(SolCondition Solution, Cut cut, const double
       U[i]=UTemp[i];	
     }
 
-   
-    if (rang == 0) Ufinal.resize(N+1);
-
-    MPI_Gatherv(U.data(),Nproc,MPI_DOUBLE,Ufinal.data(),cut.elem_recus().data(),cut.deplacement().data(),MPI_DOUBLE,0,MPI_COMM_WORLD);
-
 
 
     t+=dtloc;
     kT++;
   }
 
-  return Ufinal;
+
+  return U;
 }
 
 
@@ -307,17 +304,11 @@ std::vector<double> EulExp_NoBlock(SolCondition Solution, Cut cut, const double&
     for(int i=0;i<Nproc;i++){
       U[i]=UTemp[i];	
     }
-
-    if (rang == 0) Ufinal.resize(N+1);
-
-    MPI_Gatherv(U.data(),Nproc,MPI_DOUBLE,Ufinal.data(),cut.elem_recus().data(),cut.deplacement().data(),MPI_DOUBLE,0,MPI_COMM_WORLD);
-
-
     t+=dtloc;
     kT++;
   }
 
-  return Ufinal;
+  return U;
 }
 
 
@@ -331,7 +322,7 @@ std::vector<double> EulExp_NoBlock(SolCondition Solution, Cut cut, const double&
 
 int main (int argc, char *argv[]){
   int i,j,N,K,kprint,method;
-  double dt=0,Tfinal,dx,l;
+  double Tfinal;
   double temps_debut,temps_fin;
 
   if (argc != 6) {
@@ -349,7 +340,6 @@ int main (int argc, char *argv[]){
  }
 
   int nb_procs,rang;
-  int etiquette=100;
   MPI_Init(&argc,&argv);
   MPI_Comm_size(MPI_COMM_WORLD,&nb_procs);
   MPI_Comm_rank(MPI_COMM_WORLD,&rang);
@@ -366,15 +356,20 @@ int main (int argc, char *argv[]){
   C1.setFin(rang);
   C1.computeNproc(rang);
   
-  std::vector<double> Ufinal;
+  std::vector<double> Ufinal,U;
 
-  if(method == 1 ) Ufinal = EulExp_NoBlock(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N);
+  if(method == 1 ) U = EulExp_NoBlock(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N);
 
-  if(method == 2) Ufinal = EulExp_Sendrecv(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N);
+
+  if(method == 2) U = EulExp_Sendrecv(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N);
+
+  if (rang == 0) Ufinal.resize(N+1);
+  MPI_Gatherv(U.data(),C1.Nproc(),MPI_DOUBLE,Ufinal.data(),C1.elem_recus().data(),C1.deplacement().data(),MPI_DOUBLE,0,MPI_COMM_WORLD);
+
   
   if (rang == 0){
     Error(N,Ufinal,x,Tfinal,K,SolSinus);
-    Error_ev(N,Ufinal,x,K,Tfinal,dt,SolSinus);
+    Error_ev(N,Ufinal,x,K,Tfinal,SolSinus);
 
     std::ofstream File( "ChalExact.dat", std::ofstream::out );
     for(i=0;i<=N;i++){      
