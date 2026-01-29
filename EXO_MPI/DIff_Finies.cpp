@@ -77,9 +77,7 @@ public :
        U_.push_back( Solution(mesh[i],k,0,L));
      }
   }
-    
-  int Q() const {return Q_;}
-  int r() const {return r_;}
+
   const std::vector<int>& elem_recus() const {return elem_recus_;}
   const std::vector<int>& deplacement() const { return deplacement_;}
   int debut() const { return debut_; }
@@ -341,14 +339,15 @@ int main (int argc, char *argv[]){
     
     if(method == 2) U = EulExp_Sendrecv(SolSinus,C1,Tfinal,K,x,rang,nb_procs,N,L,dtloc,U);
 
-    if(kT % kprint == 0 or t==Tfinal){
+    if(kT % kprint == 0 or t+dtloc==Tfinal){
+
       if (rang == 0) Ufinal.resize(N+1);
       MPI_Gatherv(U.data(),C1.Nproc(),MPI_DOUBLE,Ufinal.data(),C1.elem_recus().data(),C1.deplacement().data(),MPI_DOUBLE,0,MPI_COMM_WORLD);
-    }
 
-    if (rang == 0 and kT % kprint==0){
-        File_writting(Ind,Ufinal.data(),x,N);
+      if(rang == 0){
+	File_writting(Ind,Ufinal.data(),x,N);
         Ind++;
+      }	
     }
 
     t+=dtloc;
