@@ -6,7 +6,6 @@ import numpy as np
 
 
 
-
 subprocess.run(["mpic++","EulerExp1D.cpp"])
 
 
@@ -18,7 +17,8 @@ Tfinal = 1                  ## Temps maximal
 K=1                         ## Un entier "sin(K M_PI x)
 kprint=100                  ## Pas d'écriture sur fichier
 L=1                         ## Borne supèrieure du domaine 
-methode=2                   ## Type de communication 1=Asynchrone 2=SendRecv
+methode=1                   ## Type de communication 1=Asynchrone 2=SendRecv
+Function = 1                ## Fonction employée 1= Sinus 2=Linéaire 3= Constante
 
 
 TabErr=[]
@@ -29,17 +29,20 @@ for cell in cells:
       
     
 
-    Commande=["mpirun", "-np",str(core),"a.out",str(cell),str(Tfinal),str(K),str(kprint),str(L),str(methode)]
+    Commande=["mpirun", "-np",str(core),"a.out",str(cell),str(Tfinal),str(K),str(kprint),str(L),str(methode),str(Function)]
 
     result = subprocess.run(Commande,capture_output=True,text=True)
     Erreur = [line for line in result.stdout.splitlines() if "Erreur" in line]
         
-
+    if Function ==3 or Function == 2 :
+        assert Erreur[2][9:] == 0
+        assert Erreur[1][10:] == 0
             
-    TabErr.append(float(Erreur[2][7:]))
+    TabErr.append(float(Erreur[2][9:]))
     TabErrInf.append(float(Erreur[1][10:]))
     TabCell.append(L/cell)
-   
+
+
     print(cell,"\n",result.stdout)
 
 

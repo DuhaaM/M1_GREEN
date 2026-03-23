@@ -8,264 +8,298 @@
 #include <cmath>
 #include <mpi.h>
 
-class Solution{
+class Solution{  
 private:
-  int _k;
-  double _L;
-  bool _Flag;
-  int _ID;
-  
+  bool _Exist;  // Permet de dire si l'on connait la solution exacte ou non de la solution initiale associée
 
 public:
-  Solution(const int& k, const double& L) : _k(k), _L(L){}
+  Solution(bool Exist) {  _Exist = Exist; }  // Constructeur de la classe
 
-  double L() const {return _L;}
+  virtual double Initial ( const double& x) {return 0 ; } // Fonction initiale héritant des classes dérivées
 
-  int K() const {return _k;}
+
+  virtual double Exact ( const double& x, const double& t){
+    std::cerr<< "There is no exact function"<<std::endl;
+    return 0;
+      }  // Fonction exacte héritant des classes dérivées si ces dernières possèdent une solution exacte 
+
+  bool HasExactSolution(){return _Exist;} // Vérification de l'existence de la solution exacte;
+};
   
-  double SinInit(const double& x){
-    _ID = 1;
-    _Flag = true;
-    return sin(_k*M_PI*x/_L);
-  }
 
-  double ConstInit(){
-    _ID=2;
-    _Flag = true; // La condition initiale ne variera pas au cours du programme 
-    return 18;
-  }
+class Sin : public Solution {  // Classe dérivée de la classe Solution
+private:
+  int _k ;   // Diffusivité thermique
+  double _L; // Longueur du maillage 
 
-  double LinInit(const double& x){
-    _ID=3;
-    _Flag = true; // La condition initiale ne variera pas au cours du programme
-    return -150*x+sqrt(2);
-  }
+public:
+  Sin (const int& k,const double& L) : _k(k),_L(L), Solution(true){} // Constructeur de la classe
 
+  double Initial(const double& x){return sin(_k*M_PI*x/_L);}   // Solution initiale
 
-  bool SolExist(){return _Flag;}
-  
-  double SolExact(const double& t,const double& x){
-
-    if(_ID==1)  return exp(-t*_k*_k*M_PI*M_PI/_L/_L)*SinInit(x);
-
-    if(_ID==2)  return ConstInit();
-
-    if(_ID==3)  return LinInit(x);
-
-    else{
-      std::cerr<<"Indeterminate function"<<std::endl;
-      return 0;
-    }
-  }
-
+  double Exact(const double& x,const double& t) { return exp(-t*_k*_k*M_PI*M_PI/_L/_L)*Initial(x);} // Solution exacte	 
+    
 };
 
 
-
-
-
-class Mesh{
-private:
-  int _N;
-  int _Tfinal;
-  int _nbp;
-  int _rank;
-  int _Q;
-  int _R;
-  int _debut;
-  int _fin;
-  int* _elem_recus;
-  int*  _deplacement;
-  int _Nproc;
-  double* _mesh;
-  double*  _U; 
-  Solution* Sol;
+class Lin : public Solution { // Classe dérivée de la classe Solution
 
 public:
-  Mesh(const int& N,const int& nb_procs, const int& rang,const double& L,const double& K,const double& Tfinal ) {
-    _N=N;
-    _nbp=nb_procs;
-    _rank=rang;
-    _Tfinal= Tfinal;
-    Sol = new Solution(K,L); 
+  Lin ():Solution(true){}  // Constructeur de la classe
+
+  double Initial(const double& x){return 12*x-17;} // Solution initiale
+
+  double Exact(const double& x,const double& t) { return Initial(x);} //Solution exacte 	 
+    
+};
+
+class Const : public Solution { // Classe dérivée de la classe Solution
+
+public:
+  Const ():Solution(true){}   // Constructeur de la classe
+
+  double Initial(const double& x){return 4;} // Solution initiale
+
+  double Exact(const double& x,const double& t) { return 4;} // Solution exacte 
+    
+};
+
+class Mesh{   // Classe réalisant notre méthode de calcul parallélisé 
+private:
+  double _L;                 //Longueur du maillage
+  int _NbElemtsGlob;         // Nombre de cellules définies globalement 
+  int _debut;                // Indice relatif au premier élément d'une partition par rapport au maillage initial
+  int _fin;                  // Indice relatif au dernier élément d'une partition par rapport au maillage initial
+  int* _NbElemtsLoc;         // Vecteur contenant le nombre d'élements de chaque proc
+  int* _deplacement;         // Vecteur contenant le premier indice de chaque partition du maillage  
+  int _nbp;                  // Nombre total de proc utilisés
+  int _rank;                 // Indice permettant d'identifier chaque proc 
+  double* _Init;             // Vecteur initial
+  double* _Mesh0;            // Maillage initial 
+
+public:
+  Mesh(const int& N,const double& L): _NbElemtsGlob(N),_L(L) {   // Constructeur de la classe
+    MPI_Comm_size(MPI_COMM_WORLD,&_nbp);                         // Obtention du nombre de proc
+    MPI_Comm_rank(MPI_COMM_WORLD,&_rank);                        // Indicage des proc
   }
-  
-  void computeQ(){ _Q = (_N+1) / _nbp;}
-
-  void computeR(){ _R = (_N+1) % _nbp;}
 
 
-  void computeElem_recus(){
-    _elem_recus= new int[_nbp];
+  void computeNbElemtsLoc(){   // Définition du nombre de cellules sur chaque partition
+    _NbElemtsLoc= new int[_nbp];
     for(int j=0;j<_nbp;j++){
-      _elem_recus[j]=_Q;
-      if (j < _R and _R > 0) _elem_recus[j]++;
+      _NbElemtsLoc[j]=(_NbElemtsGlob+1) / _nbp;
+      if (j < (_NbElemtsGlob+1) % _nbp and (_NbElemtsGlob+1) % _nbp > 0) _NbElemtsLoc[j]++;
     }
   }
 
-  void computeDeplacement(){
+  
+  void computeDeplacement(){  // Définiton des premiers indices de chaque cellules 
     _deplacement= new int[_nbp];
     _deplacement[0]=0;
     for(int j=1;j<_nbp;j++){
-      _deplacement[j]=_deplacement[j-1]+_elem_recus[j-1];
+      _deplacement[j]=_deplacement[j-1]+_NbElemtsLoc[j-1];
     }
   }
 
-  void setDebut(){ _debut= _rank*_Q +std::min(_rank,_R);}
+
+  void setDebut(){ _debut= _deplacement[_rank];}  // Réecriture équivoque du premier inidice d'une partition 
+
+  const int Debut() {return _debut;}
  
-  void setFin(){ _fin = _debut+ _elem_recus[_rank]-1;}
+  void setFin(){ _fin = _debut+ _NbElemtsLoc[_rank]-1; } // Défnition du dernier indice d'une partition
 
-  void computeNproc(){  _Nproc = _fin-_debut+1; }    // NB d'éléments par partition
+  const int Fin() {return _fin;}
 
 
-  double* mesh(){
-    _mesh=new double[_N+1];
-    for ( int i=0; i<=_N;i++) _mesh[i]=i*(Sol->L())/double(_N);
-    return _mesh;
+  double* AllocateMemory(){       
+    return new double[_NbElemtsLoc[_rank]+2];   // Allocation mémoire d'une partition avec un point fantôme à chaque extrémité 
   }
 
   
-  void computeU(){
+  double* DefMesh(const double& L ){   // Défnition de chaque point du maillage global 
+    _Mesh0=new double[_NbElemtsGlob+1];
+    for ( int i=0; i<=_NbElemtsGlob;i++) _Mesh0[i]=i*_L/double(_NbElemtsGlob);
+    return _Mesh0;
+  }
+
+  
+  double* Initialize(Solution* Sol){  // Initialisatoion de nos partitions par la solution choisie 
     int j =1 ;
-    _U= new double[_Nproc+2];
+    _Init= new double[_NbElemtsLoc[_rank]+2];
       for (int i=_debut; i<=_fin;i++){
-	_U[j]=Sol->SinInit(_mesh[i]) ;
+	_Init[j]=Sol->Initial(_Mesh0[i]) ;
 	j++;
       }
+      
+      return _Init;
   }
 
 
-  void AsynchroneComm( double* X,double* x, const double& dtloc){
-    MPI_Request request[4];
-    int nb_req=0;
+  void AsynchroneComm(double* x, MPI_Request* request){  // Méthode de communication asynchrone entre les partitions juxatposées 
     int etiquette=100;
 
-    double dx= Sol->L()/double(_N);
+    for (int i=0;i < 4;i++) request[i]=MPI_REQUEST_NULL;
+
     
-    if (_rank != _nbp-1) MPI_Irecv(&x[_Nproc+1],1,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
-    if (_rank != 0)MPI_Irecv(&x[0],1,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+    if (_rank != _nbp-1) MPI_Irecv(&x[_NbElemtsLoc[_rank]+1],1,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,&request[0]); // Définition d'une zone de réception
+    if (_rank != 0)MPI_Irecv(&x[0],1,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,&request[1]);
 
-    if (_rank != _nbp-1) MPI_Isend(&x[_Nproc],1,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
-    if (_rank != 0) MPI_Isend(&x[1],1,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,&request[nb_req++]);
+    if (_rank != _nbp-1) MPI_Isend(&x[_NbElemtsLoc[_rank]],1,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,&request[2]); // Envoi des valeurs 
+    if (_rank != 0) MPI_Isend(&x[1],1,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,&request[3]);
+  
+  }
+
+  void Wait(MPI_Request* request){  MPI_Waitall(4,request,MPI_STATUS_IGNORE);} // Attente de la fin des communications asynchrones  
 
 
-    for (int i = 2; i<=_Nproc-1; i++){
-      X[i]= x[i] + dtloc / dx / dx * ( x[i+1]- 2 * x[i]+ x[i-1] );
+  void SynchroneComm(double* x){ // Méthode de communication synchrone entre les partitions juxatposées
+    int etiquette=100;
+
+    if (_rank != _nbp-1) MPI_Sendrecv(&x[_NbElemtsLoc[_rank]],1,MPI_DOUBLE,_rank+1,etiquette,&x[_NbElemtsLoc[_rank]+1],1,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+    
+    // Échange des valeurs entre bornes juxtaposées
+
+    if ( _rank != 0)  MPI_Sendrecv(&x[1],1,MPI_DOUBLE,_rank-1,etiquette,&x[0],1,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+
+  }
+
+
+  void Next(double* Utemp, double* U, const double& dtloc){ // Calcul de notre partition au temps suivant
+    const double dx = _L / double (_NbElemtsGlob); 
+    for (int i = 2; i<=_NbElemtsLoc[_rank]-1; i++){
+      Utemp[i]= U[i] + dtloc / dx / dx * ( U[i+1]- 2 * U[i]+ U[i-1] ); // Application de la méthode d'Euler Explicite 
     }
 
     
-    MPI_Waitall(nb_req,request,MPI_STATUS_IGNORE);
-
-    if (_rank!=0) X[1]=x[1] + dtloc /dx /dx * ( x[2] - 2*x[1] + x[0]);
-    else X[1]=0;
-
-    if (_rank!=_nbp-1)X[_Nproc]=x[_Nproc] + dtloc /dx /dx * ( x[_Nproc+1] - 2*x[_Nproc] + x[_Nproc-1]);
-    else X[_Nproc]=0;
-
   }
 
-  void SynchroneComm(double* X, double* x, const double& dtloc){
-    int etiquette=100;
-    double dx= Sol->L()/double(_N);
+  void BoundNext(double* Utemp, double* U, const double& dtloc){ // Calcul des nos bornes de chaque partition nécessitant les communications 
+    const double dx = _L / double (_NbElemtsGlob);
 
-    if (_rank != _nbp-1) MPI_Sendrecv(&_U[_Nproc],1,MPI_DOUBLE,_rank+1,etiquette,&_U[_Nproc+1],1,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-    if ( _rank != 0)  MPI_Sendrecv(&_U[1],1,MPI_DOUBLE,_rank-1,etiquette,&_U[0],1,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
-
-    for (int i = 1; i<=_Nproc; i++){
-      X[i]= x[i] + dtloc / dx / dx * ( x[i+1]- 2 * x[i]+ x[i-1] );
-    }
-
-    if (_rank==0) X[1]=0;
     
-    if (_rank==_nbp-1) X[_Nproc]=0;
+    if (_rank!=0) Utemp[1]=U[1] + dtloc /dx /dx * ( U[2] - 2*U[1] + U[0]);
+    else Utemp[1]=U[1];
+
+    if (_rank!=_nbp-1) Utemp[_NbElemtsLoc[_rank]] = U[_NbElemtsLoc[_rank]] + dtloc /dx /dx * ( U[_NbElemtsLoc[_rank]+1] -  2 * U[_NbElemtsLoc[_rank]] + U[_NbElemtsLoc[_rank]-1] );
+    else Utemp[_NbElemtsLoc[_rank]]= U[_NbElemtsLoc[_rank]];
+  }
+
+  double* Copy(double* Utemp, double* U){  // Redéfiniton de U au temps t suivant
+    for(int i = 1; i<=_NbElemtsLoc[_rank]; i++){
+      U[i]=Utemp[i];
+      }
+    return U;
   }
 
 
-  double* Gather(const double* const x){
-    double* X = new double[_N+1];
-    MPI_Gatherv(&x[1],_Nproc,MPI_DOUBLE,X,_elem_recus,_deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);
-    return X;
+
+  void Write(const int& Ind,const double* const x, Solution* Sol,double& T){  // Écriture externe des solutions au temps T 
+    double* X = nullptr;
+    if(_rank == 0)  X = new double[_NbElemtsGlob+1];
+    MPI_Gatherv(&x[1],_NbElemtsLoc[_rank],MPI_DOUBLE,X,_NbElemtsLoc,_deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);  // Réunion de nos partition sur un unique proc
+ 
+    if (_rank == 0){   
+      std::stringstream mystream; 
+      mystream<<"Data/Chal"<<Ind<<".csv"; // Définition du nom de fichier 
+      
+      std::ofstream File( mystream.str(), std::ofstream::out ); // Ouverture du fichier
+      File << "#Indice , #Point maillage , #Solution obtenue , #Solution exacte  \n ";
+      
+      for(int i=0;i<=_NbElemtsGlob;i++){      
+	File <<i<<","<< _Mesh0[i]<<","<<X[i]<<','<<Sol->Exact(_Mesh0[i],T)<<"\n";  //Écriture de l'indice / du point du maillage / de notre solution obtenue et de la solution exacte  
+      }   
+      File.close();  // Fermeture du fichier 
+    }
   }
 
 
-  void Verif(const int& kT){
-    double dx= Sol->L() /double(_N);
-    double dt= 0.4*dx*dx;
+};
+  
+
+
+class Error{  //Classe calculant les erreurs de notre méthode
+private:
+  double _L;             // Longueur du maillage 
+  int _NbElemtsGlob;     // Nombre d'éléments du maillage 
+  int _k;                // Diffusivité thermique 
+  double _Tfinal;        // Temps final 
+  double* _Mesh0;        // Maillage défini
+  int _fin;              // Dernier indice de chaque partition
+  int _debut;            // Premier indice de chaque partition 
+  int _rank;             // Indice de chaque proc 
+  
+
+public:
+  Error(const double& L,const int& N, const int& k,const double& Tfinal,double* Init,const int& debut,const int& fin):_L(L), _NbElemtsGlob(N), _k(k), _Tfinal(Tfinal), _Mesh0(Init),_debut(debut),_fin(fin){
+    MPI_Comm_rank(MPI_COMM_WORLD,&_rank);   //Constructeur de la classe
+  } 
+
+
+  void Verif(const int& kT,Solution* Sol){  // Propriété de la solution sinus vérifiant la convergence du schéma  
+    double dx= _L /double(_NbElemtsGlob);
     double Normesqrt_U0=0,vp,Err;
 
-    for (int i=0; i<=_N;i++){
-      Normesqrt_U0 += dx*Sol->SinInit(_mesh[i])*Sol->SinInit(_mesh[i]);
+    for (int i=0; i<=_NbElemtsGlob;i++){
+      Normesqrt_U0 += dx*Sol->Initial(_Mesh0[i])*Sol->Initial(_Mesh0[i]);
     }
     
-    vp= 2*dt* (cos (Sol->K()*M_PI*dx) -1) / (dx*dx) +1;
+    vp= 4* (cos (_k*M_PI*dx) -1) / 5 +1;
 
-    Err=abs( pow(vp,kT) - exp(-_Tfinal* Sol->K()*Sol->K() *M_PI*M_PI /Sol->L()/Sol->L() ) );
+    Err=abs( pow(vp,kT) - exp(-_Tfinal* _k*_k * M_PI*M_PI /_L/_L ) );
 
-    std::cout<<"Erreur_vp="<<sqrt(Normesqrt_U0)*Err<<std::endl;
+    if (_rank==0)std::cout<<"Erreur_cv="<<sqrt(Normesqrt_U0)*Err<<std::endl;
 
   }
 
-  void ErrorInf(const double* Vect){
-    double Err=0;
-    for (int i=1 ; i<_N ; i++) Err=std::max(Err,std::abs(Vect[i]-Sol->SolExact(_Tfinal,_mesh[i])));
-    std::cout<<"ErreurInf="<<Err<<std::endl;
+  void ErrorInf(const double* Vect, Solution* Sol){  // Calcul de l'erreur en norme infinie
+    double Errloc=0,Errglob=0; 
+    int j=1;
+    for (int i=_debut ; i<_fin ; i++){
+      Errloc=std::max(Errloc,std::abs(Vect[j]-Sol->Exact(_Mesh0[i],_Tfinal)));
+      j++;
+    }
+    MPI_Reduce(&Errloc,&Errglob,1,MPI_DOUBLE,MPI_MAX,0,MPI_COMM_WORLD); //  Défnition du max entre tous les max de chaque proc 
+    if(_rank==0) std::cout<<"ErreurInf="<<Errglob<<std::endl;
   }
 
 
-  void ErrorL2(const double* Vect){
-    double Err=0;
-    double dx = Sol->L()/double(_N);
+  void ErrorL2(const double* Vect, Solution* Sol){ // Calcul approché de l'erreur L2 par une quadrature de Gauss en 2 points
+    double Errloc=0,Errglob=0;
+    double dx = _L/double(_NbElemtsGlob);
     double x_1=1 /sqrt(3), x_2=-1/sqrt(3);
-
-    for (int i=0; i < _N ; i++){
+    int j=1;
+    for (int i=_debut; i < _fin ; i++){
       
-      double xG1= (_mesh[i+1]+_mesh[i]) / 2 + (_mesh[i+1]-_mesh[i]) / 2 * x_1;
-      double xG2= (_mesh[i+1]+_mesh[i]) / 2 + (_mesh[i+1]-_mesh[i]) / 2 * x_2;
+      double xG1= (_Mesh0[i+1]+_Mesh0[i]) / 2 + (_Mesh0[i+1]-_Mesh0[i]) / 2 * x_1; // Défnition des points de Gauss
+      double xG2= (_Mesh0[i+1]+_Mesh0[i]) / 2 + (_Mesh0[i+1]-_Mesh0[i]) / 2 * x_2;
 
-      Err+= dx / 2 * (-Sol->SolExact(_Tfinal,xG1) + (Vect[i+1]+Vect[i])/2 + (Vect[i+1]-Vect[i])/2 *x_1) * (-Sol->SolExact(_Tfinal,xG1) + (Vect[i+1]+Vect[i])/2 + (Vect[i+1]-Vect[i])/2 *x_1);
+      Errloc+= dx / 2 * (-Sol->Exact(xG1,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1) * (-Sol->Exact(xG1,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1);
 
-      Err+= dx / 2 * (-Sol->SolExact(_Tfinal,xG2) + (Vect[i+1]+Vect[i])/2 + (Vect[i+1]-Vect[i])/2 *x_2) * (-Sol->SolExact(_Tfinal,xG2) + (Vect[i+1]+Vect[i])/2 + (Vect[i+1]-Vect[i])/2 *x_2);
-
+      Errloc+= dx / 2 * (-Sol->Exact(xG2,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2) * (-Sol->Exact(xG2,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2);
+      j++;
     }
-    std::cout<<"Erreur="<<sqrt(Err)<<std::endl;
+
+    MPI_Reduce(&Errloc,&Errglob,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD); // Somme des erreurs calculées sur chaque proc 
+    
+    if(_rank==0) std::cout<<"ErreurL2="<<sqrt(Errglob)<<std::endl;
 
   }
- 
-
-  void File_Writting(const int& Ind,const double* const X){
-    std::stringstream mystream;
-    mystream<<"Data/Chal"<<Ind<<".dat";
-    
-    std::ofstream File( mystream.str(), std::ofstream::out );
-    for(int i=0;i<=_N;i++){      
-      File << X[i]<<'\n';
-    }   
-    File.close();
-
-}
-    
-    
-
-  const int debut() const { return _debut; }
-  const int fin()   const { return _fin; }
-  const int Nproc() const { return _Nproc ; }
-  const int* elem_recus() const {return _elem_recus ;}
-  const int* deplacement() const { return _deplacement ;}
-  double* U(){return _U ;}
 };
-
+ 
+   
+    
+    
 
 
 
 int main (int argc, char *argv[]){
-  int i,j,N,K,kprint,method;
+  int N,K,kprint,method,Function,rang;
   double Tfinal,L;
   double temps_debut,temps_fin;
 
   // Définiton manuelle des variables 
-  if (argc != 7) {
-    std::cerr << "usage is : " << argv[0] << " <N=mesh size> <t=final time> <K=integer> <kprint=print step> <L=Upperbound> <Comm_Method : Non-Blocking = 1 or Sendrecv = 2 >"
+  if (argc != 8) {
+    std::cerr << "usage is : " << argv[0] << " <N=mesh size> <t=final time> <K=integer> <kprint=print step> <L=Upperbound> <Comm_Method : Non-Blocking = 1 or Sendrecv = 2 > <Function : 1 =  Sinus , 2 = Linear , 3 = Constant > "
 	      << std::endl;
     return 0;
   }
@@ -277,83 +311,107 @@ int main (int argc, char *argv[]){
     kprint=std::atoi(argv[4]);
     L=std::atof(argv[5]);
     method = std::atoi(argv[6]);
+    Function  = std::atoi(argv[7]);
  }
 
-  int nb_procs,rang;
-  MPI_Init(&argc,&argv);
-  MPI_Comm_size(MPI_COMM_WORLD,&nb_procs);
-  MPI_Comm_rank(MPI_COMM_WORLD,&rang);
+  MPI_Init(&argc,&argv);    // Initialisation de MPI
+  MPI_Comm_rank(MPI_COMM_WORLD,&rang); // On récupère les indices des proc pour écrire les sorties avec un seul proc
 
-  Mesh Mesh(N,nb_procs,rang,L,K,Tfinal);
-  //Défnition du maillage
+  Solution* Sol = nullptr;  // Création d'un pointeur nul vers notre solution 
+ 
+  if (Function == 1) Sol = new Sin(K,L);
 
-  Mesh.computeQ();
-  Mesh.computeR();
-  Mesh.computeElem_recus();
-  Mesh.computeDeplacement(); 
+  if (Function == 2) Sol= new Lin() ;          //Définiton da la solution pointée
+
+  if (Function == 3) Sol = new Const() ;
+  
+  Mesh Mesh(N,L);  
+
+  Mesh.computeNbElemtsLoc(); // On calcule nos premières valeurs permettant nos calculs
+  Mesh.computeDeplacement();
   Mesh.setDebut();
   Mesh.setFin();
-  Mesh.computeNproc();
  
 
-  double* x = Mesh.mesh();
+  double* x = Mesh.DefMesh(L);  // Définition du maillage global
 
-  Mesh.computeU();
-
-  double dx = L/double(N);
-  double dtloc = 0.4* dx *dx;
+  double dx= L / double(N);      // Pas d'espace
+  double dtloc= 0.4 * dx * dx;   // Pas de temps
   double t=0,time=0;
   int kT=0,Ind=0;
+ 
+  double* Utemp= Mesh.AllocateMemory(); // Allocation mémoire du vecteur au temps t+1
+ 
 
-  double* U = Mesh.U();
-  double* Utemp= new double[Mesh.Nproc()+2];
+  MPI_Request request[4];  // Création de nos identifiants de requête pour la méthode asynchrone
   
-  while( t < Tfinal ) {
+  
+  double* U =  Mesh.Initialize(Sol);  // Initialisation du maillage en fonction de la solution 
+  
+   
+   
+  while( t < Tfinal ) {  // Boucle de calcul sur le temps 
+  
+    if ( t + dtloc > Tfinal) dtloc = Tfinal - t;   // Assurance de terminer au temps Tfinal 
 
-    if ( t + dtloc > Tfinal) dtloc = Tfinal - t;
-
-    if (rang==0)temps_debut=MPI_Wtime();
+    if (rang==0)temps_debut=MPI_Wtime();  // Marqueur de temps=0 pour le temps de calcul
 
     
-    if ( method == 1) Mesh.AsynchroneComm(Utemp,U,dtloc);
+    if ( method == 1) { // Utilisation de la méthode de communication asynchrone
 
-    if ( method == 2) Mesh.SynchroneComm(Utemp,U,dtloc);
+      Mesh.AsynchroneComm(U,request);     // Réalistion des communications 
+      Mesh.Next(Utemp,U,dtloc);           // Calcul au temps suivant
+      Mesh.Wait(request);                 // Attente de la fin des communications 
+      Mesh.BoundNext(Utemp,U,dtloc);      // Calcul des bords nécessitant les communications 
+      Mesh.Copy(Utemp,U);                 // Passsage de U au temps suivant 
 
-    if(rang==0){
-      temps_fin=MPI_Wtime();
-      time+=temps_fin-temps_debut;
+    }
+
+    
+    if ( method == 2) { // Utilisation de la méthode de communication synchrone
+
+      Mesh.SynchroneComm(U);              // Réalisation des communications 
+      Mesh.Next(Utemp,U,dtloc);           // Calcul au temps suivant
+      Mesh.BoundNext(Utemp,U,dtloc);      // Calcul des bords nécessiant les communications
+      Mesh.Copy(Utemp,U);                 // Passage de U au temps suivant
     }
 
 
+    if(rang==0){
+      temps_fin=MPI_Wtime();         // Marqueur de fin de temps pour le temps de calcul
+      time+=temps_fin-temps_debut;   // Somme du temps de calcul à chaque passage dans la boucle 
+    }
 
-    for(int i = 1; i<=Mesh.Nproc(); i++){
-      U[i]=Utemp[i];
-      }
 
-     if (kT % kprint == 0) {
-       Mesh.File_Writting(Ind,Mesh.Gather(U));
-       Ind++;
+    
+
+    
+
+    if (kT % kprint == 0) {  // On écrit un fichier tous les kprint itérations 
+
+      Mesh.Write(Ind,U,Sol,Tfinal); // Écriture du fichier 
+      Ind++; 
      }
      
-    t+=dtloc;
-    kT++;
+    t+=dtloc; // Passage au temps suivant 
+    kT++;     // Nombre d'itérations 
   }
 
-
-  double* Ufinal = Mesh.Gather(U);
-
-  
-  
-  if (rang == 0 ){
-    std::cout<<"Communication time  = "<<time<<"s"<<std::endl;
-    Mesh.Verif(kT);
-    Mesh.ErrorInf(Ufinal);
-    Mesh.ErrorL2(Ufinal);
-  }
-  
+  Error Error(L,N,K,Tfinal,x,Mesh.Debut(),Mesh.Fin());
 
   
-  MPI_Finalize();
+  
+  if (rang == 0 ) std::cout<<"Computing time  = "<<time<<"s"<<std::endl;   //Sortie du temps de calcul  
+
+
+  if (Function == 1)Error.Verif(kT,Sol);   // Vérification convergence de par les propriétés de la fonction sinus 
+  Error.ErrorInf(U,Sol);                   // Calcul de l'erreur en norme infinie 
+  Error.ErrorL2(U,Sol);                    // Calcul de l'erreur en norme L2 
+
+  
+
+  
+  MPI_Finalize();        // Fin de MPI
   return 0;
 
  
