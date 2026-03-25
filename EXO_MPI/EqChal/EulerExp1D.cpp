@@ -116,7 +116,7 @@ public:
   }
 
   
-  double* DefMesh(const double& L ){   // Défnition de chaque point du maillage global 
+  double* DefMesh(){   // Défnition de chaque point du maillage global 
     _Mesh0=new double[_NbElemtsGlob+1];
     for ( int i=0; i<=_NbElemtsGlob;i++) _Mesh0[i]=i*_L/double(_NbElemtsGlob);
     return _Mesh0;
@@ -333,7 +333,7 @@ int main (int argc, char *argv[]){
   Mesh.setFin();
  
 
-  double* x = Mesh.DefMesh(L);  // Définition du maillage global
+  double* x = Mesh.DefMesh();  // Définition du maillage global
 
   double dx= L / double(N);      // Pas d'espace
   double dtloc= 0.4 * dx * dx;   // Pas de temps
