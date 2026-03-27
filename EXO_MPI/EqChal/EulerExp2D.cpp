@@ -281,21 +281,6 @@ public:
   } 
 
 
-  void Verif(const int& kT,Solution* Sol){  // Propriété de la solution sinus vérifiant la convergence du schéma  
-    double dx= _L /double(_NbxElemtsGlob);
-    double Normesqrt_U0=0,vp,Err;
-
-    for (int i=0; i<=_NbxElemtsGlob;i++){
-      Normesqrt_U0 += dx*Sol->Initial(_Mesh0x[i],0)*Sol->Initial(_Mesh0x[i],0);
-    }
-    
-    vp= 4* (cos (_k*M_PI*dx) -1) / 5 +1;
-
-    Err=abs( pow(vp,kT) - exp(-_Tfinal* _k*_k * M_PI*M_PI /_L/_L ) );
-
-    if (_rank==0)std::cout<<"Erreur_cv="<<sqrt(Normesqrt_U0)*Err<<std::endl;
-
-  }
 
   void ErrorInf(const double* Vect, Solution* Sol){  // Calcul de l'erreur en norme infinie
     double Errloc=0,Errglob=0; 
@@ -320,7 +305,10 @@ public:
       
       double xG1= (_Mesh0x[i+1]+_Mesh0x[i]) / 2 + (_Mesh0x[i+1]-_Mesh0x[i]) / 2 * x_1; // Défnition des points de Gauss
       double xG2= (_Mesh0x[i+1]+_Mesh0x[i]) / 2 + (_Mesh0x[i+1]-_Mesh0x[i]) / 2 * x_2;
-
+      
+      double yG1= (_Mesh0y[i+1]+_Mesh0y[i]) / 2 + (_Mesh0y[i+1]-_Mesh0y[i]) / 2 * x_1; // Défnition des points de Gauss
+      double yG2= (_Mesh0y[i+1]+_Mesh0y[i]) / 2 + (_Mesh0y[i+1]-_Mesh0y[i]) / 2 * x_2;
+      
       Errloc+= dx / 2 * (-Sol->Exact(xG1,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1) * (-Sol->Exact(xG1,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1);
 
       Errloc+= dx / 2 * (-Sol->Exact(xG2,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2) * (-Sol->Exact(xG2,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2);
@@ -401,11 +389,7 @@ int main (int argc, char *argv[]){
   
   
   double* U =  Mesh.Initialize(Sol);  // Initialisation du maillage en fonction de la solution
-
-  if( rang==1 ){
-    for (int i = 0; i<20;i++) std::cout<<i<<"\t"<<U[i]<<std::endl;
-  }
-  
+ 
    
    
   while( t < Tfinal ) {  // Boucle de calcul sur le temps 
@@ -462,7 +446,6 @@ int main (int argc, char *argv[]){
   if (rang == 0 ) std::cout<<"Computing time  = "<<time<<"s"<<std::endl;   //Sortie du temps de calcul  
 
 
-  if (Function == 1)Error.Verif(kT,Sol);   // Vérification convergence de par les propriétés de la fonction sinus 
   Error.ErrorInf(U,Sol);                   // Calcul de l'erreur en norme infinie 
   Error.ErrorL2(U,Sol);                    // Calcul de l'erreur en norme L2 
 
