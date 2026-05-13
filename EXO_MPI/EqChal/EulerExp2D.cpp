@@ -37,7 +37,7 @@ public:
 
   double Initial(const double& x,const double& y){return sin(_k*M_PI*x/_Lx)*sin(_k*M_PI*y/_Ly);}   // Solution initiale
 
-  double Exact(const double& x,const double& y,const double& t) { return exp(-t*_k*_k*M_PI*M_PI/_Lx/_Lx)*exp(-t*_k*_k*M_PI*M_PI/_Ly/_Ly)*Initial(x,y);} // Solution exacte	 
+  double Exact(const double& x,const double& y,const double& t) { return exp(-t* _k*_k* M_PI*M_PI * (1/_Lx/_Lx + 1/_Ly/_Ly) )*Initial(x,y);} // Solution exacte	 
     
 };
 
@@ -69,39 +69,98 @@ private:
   double _Lx;                // Longueur du maillage en abscisse
   double _Ly;                // Longueur du maillage en ordonnée
   int _NbxElemtsGlob;        // Nombre de cellules en abscisse définies globalement
-  int _nx;                   // Nombre réel d'élémennt sur une ligne 
+  int _nx;                   // Nombre réel d'élément sur une ligne 
   int _NbyElemtsGlob;        // Nombre de cellules en ordonnée définies globalement
+  int _ny;                   // Nombre réel d'élement sur une colonne
   int _debut;                // Indice relatif au premier élément d'une partition par rapport au maillage initial
+  int _debutx;
+  int _debuty;
   int _fin;                  // Indice relatif au dernier élément d'une partition par rapport au maillage initial
   int* _NbElemtsLoc;         // Vecteur contenant le nombre d'élements de chaque proc
   int* _NyLoc;               // Vecteur contenant le nombre de lignes de chaque proc
+  int* _NxLoc;               // Vecteur contenant le nombre de colonnes de chaque proc
   int* _deplacement;         // Vecteur contenant le premier indice de chaque partition du maillage  
   int _nbp;                  // Nombre total de proc utilisés
   int _rank;                 // Indice permettant d'identifier chaque proc 
   double* _Init;             // Vecteur initial
   double* _Mesh0x;           // Maillage en abscisse initial
   double* _Mesh0y;           // Maillage en ordonnée initial 
+  int* _dims;              // Nombre de proc par dimension
+  int _neighbor[4];          // Rang des proc voisins
+  MPI_Comm comm_2D;
+  int* _coords;
+  int _nb_req;
+  int* _NbLocGhost;
   
 public:
   Mesh(const int& Nx,const int& Ny,const double& Lx,const double& Ly): _NbxElemtsGlob(Nx),_NbyElemtsGlob(Ny),_Lx(Lx), _Ly(Ly) {   // Constructeur de la classe
     MPI_Comm_size(MPI_COMM_WORLD,&_nbp);                         // Obtention du nombre de proc
     MPI_Comm_rank(MPI_COMM_WORLD,&_rank);                        // Indicage des proc
+    _ny=_NbyElemtsGlob+1;
     _nx=_NbxElemtsGlob+1;
   }
 
 
+
+  MPI_Comm DefComm(){  //On créer notre repère cartésien pour faciliter la communication
+    int _ndims = 2;
+    int _reorganisation;
+    int _periode[_ndims];
+    _coords = new int[2];
+    _dims = new int[2];
+
+    _dims[0]=0;
+    _dims[1]=0;
+    _periode[0]=false;
+    _periode[1]=false;
+    _reorganisation=false;
+
+    MPI_Dims_create(_nbp, 2 ,_dims);
+    
+    
+    MPI_Cart_create(MPI_COMM_WORLD,_ndims,_dims,_periode,_reorganisation,&comm_2D);
+    MPI_Cart_coords(comm_2D,_rank,_ndims,_coords);
+
+    return comm_2D;
+  }
+
+
+  void Defneighbor(){  // On identifie les voisins de notre proc
+    int Left=0, Right=1, Top=2, Bottom=3;
+
+    MPI_Cart_shift(comm_2D,0,1,&_neighbor[Left],&_neighbor[Right]);
+
+    MPI_Cart_shift(comm_2D,1,1,&_neighbor[Bottom],&_neighbor[Top]);
+    
+
+  }
+
   void computeNbElemtsLoc(){   // Définition du nombre de cellules sur chaque partition
     _NbElemtsLoc= new int[_nbp];
     _NyLoc= new int[_nbp];
+    _NxLoc= new int[_nbp];
+
     
-    for(int j=0;j<_nbp;j++){
-      _NyLoc[j] = (_NbyElemtsGlob+1) / _nbp;
-      if (j < (_NbyElemtsGlob+1) % _nbp and (_NbyElemtsGlob+1) % _nbp > 0) _NyLoc[j]++;
-      _NbElemtsLoc[j]=_NyLoc[j]*(_nx);
-    }
+   
+    _NyLoc[_rank] = _ny / _dims[1];
+    if (_coords[1] < _ny % _dims[1] && _ny  % _dims[1] > 0) _NyLoc[_rank]++;
+    _NxLoc[_rank] = _nx / _dims[0];
+    if (_coords[0] < _nx % _dims[0] && _nx % _dims[0] > 0) _NxLoc[_rank]++;
+    _NbElemtsLoc[_rank]=_NyLoc[_rank]*_NxLoc[_rank];
+
+    MPI_Allgather(&_NbElemtsLoc[_rank],1,MPI_INT,_NbElemtsLoc,1,MPI_INT,MPI_COMM_WORLD);
+    MPI_Allgather(&_NyLoc[_rank],1,MPI_INT,_NyLoc,1,MPI_INT,MPI_COMM_WORLD);
+    MPI_Allgather(&_NxLoc[_rank],1,MPI_INT,_NxLoc,1,MPI_INT,MPI_COMM_WORLD);
+    
   }
 
-  int* Nyloc(){return _NyLoc;}
+  int* NyLoc(){return _NyLoc;}
+  int* NxLoc(){return _NxLoc;}
+
+  void NbLocGhost(){
+    _NbLocGhost= new int[_nbp];
+    _NbLocGhost[_rank] = (_NyLoc[_rank]+2)*(_NxLoc[_rank]+2) ;
+  }
   
   void computeDeplacement(){  // Définiton des premiers indices de chaque cellules 
     _deplacement= new int[_nbp];
@@ -112,17 +171,19 @@ public:
   }
 
 
-  void setDebut(){ _debut= _deplacement[_rank];}  // Réecriture équivoque du premier inidice d'une partition 
+  void setDebut(){ _debut= _deplacement[_rank];
+    _debuty = _coords[1] * (_ny / _dims[1]) + std::min(_coords[1], _ny % _dims[1]);
 
-  const int Debut() {return _debut;}
- 
-  void setFin(){ _fin = _debut+ _NbElemtsLoc[_rank] -1; } // Défnition du dernier indice d'une partition
+    _debutx = _coords[0] * (_nx / _dims[0]) + std::min(_coords[0], _nx % _dims[0]);
 
-  const int Fin() {return _fin;}
+  }  // Réecriture équivoque du premier inidice d'une partition 
+
+  const int Debuty() { return _debuty;}
+  const int Debutx() { return _debutx;}
 
 
   double* AllocateMemory(){       
-    return new double[_NbElemtsLoc[_rank]+2*_nx];   // Allocation mémoire d'une partition avec un point fantôme à chaque extrémité 
+    return new double[_NbLocGhost[_rank]];   // Allocation mémoire d'une partition avec un point fantôme à chaque extrémité 
   }
 
   
@@ -134,94 +195,218 @@ public:
 
   
   double* DefMeshy(){   // Défnition de chaque point du maillage global 
-    _Mesh0y=new double[_NbyElemtsGlob+1];
+    _Mesh0y=new double[_ny];
     for ( int i=0; i<=_NbyElemtsGlob;i++) _Mesh0y[i]=i*_Ly/double(_NbyElemtsGlob);
     return _Mesh0y;
   }
+
   
   double* Initialize(Solution* Sol){  // Initialisatoion de nos partitions par la solution choisie 
-    int j =_nx ;
-    _Init= new double[_NbElemtsLoc[_rank]+2*_nx];
-    for (int k =0; k<_NyLoc[_rank];k++){
-      for (int i=0; i<=_NbxElemtsGlob;i++){
-	_Init[j++]=Sol->Initial(_Mesh0x[i],_Mesh0y[_debut/_nx+k]) ;
+    _Init= new double[_NbLocGhost[_rank]];
+    for (int k =1; k<=_NyLoc[_rank];k++){
+      for (int i=1; i<=_NxLoc[_rank];i++){
+     	int I = i+k*(_NxLoc[_rank]+2);
+	
+     	_Init[I]=Sol->Initial(_Mesh0x[_debutx+i-1],_Mesh0y[_debuty+k-1]) ;
+        
       }
     }
+    
     
     return _Init;
   }
 
-
-  void AsynchroneComm(double* x, MPI_Request* request){  // Méthode de communication asynchrone entre les partitions juxatposées 
-    int etiquette=100;
-
-    for (int i=0;i < 4;i++) request[i]=MPI_REQUEST_NULL;
-
-    
-    if (_rank != _nbp-1) MPI_Irecv(&x[_NbElemtsLoc[_rank]+_nx],_nx,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,&request[0]); // Définition d'une zone de réception
-    if (_rank != 0)MPI_Irecv(&x[0],_nx,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,&request[1]);
-
-    if (_rank != _nbp-1) MPI_Isend(&x[_NbElemtsLoc[_rank]],_nx,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,&request[2]); // Envoi des valeurs 
-    if (_rank != 0) MPI_Isend(&x[_nx],_nx,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,&request[3]);
-  
+  double* AllocateCommMemory(){
+    return new double[_NyLoc[_rank]];
   }
 
-  void Wait(MPI_Request* request){  MPI_Waitall(4,request,MPI_STATUS_IGNORE);} // Attente de la fin des communications asynchrones  
+
+  
+  MPI_Datatype DefMess(){     // On définit un nouveau type de données représentant une colonne de notre matrice 
+    MPI_Datatype MPI_COL;
+    MPI_Type_vector(_NyLoc[_rank],1,_NxLoc[_rank]+2,MPI_DOUBLE,&MPI_COL);
+    MPI_Type_commit(&MPI_COL);
+    return MPI_COL;
+  }
+
+  int AsynchroneComm(double* x, MPI_Request* request,MPI_Datatype MPI_COL,double* RecvL,double* RecvR) {  // Méthode de communication asynchrone entre les partitions juxatposées 
+    int etiquette=100;
+    int _nb_req = 0;
+
+    for (int i=0;i < 8 ;i++) request[i]=MPI_REQUEST_NULL;
 
 
-  void SynchroneComm(double* x){ // Méthode de communication synchrone entre les partitions juxatposées
+    if (_neighbor[0]!=MPI_PROC_NULL)MPI_Irecv(&x[0+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,comm_2D,&request[_nb_req++]); // Définition d'une zone de réception
+    if (_neighbor[1]!=MPI_PROC_NULL)MPI_Irecv(&x[(_NxLoc[_rank]+1)+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,comm_2D,&request[_nb_req++]);
+
+    if (_neighbor[0]!=MPI_PROC_NULL)MPI_Isend(&x[1+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,comm_2D,&request[_nb_req++]); // Envoi des valeurs 
+    if (_neighbor[1]!=MPI_PROC_NULL)MPI_Isend(&x[_NxLoc[_rank]+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,comm_2D,&request[_nb_req++]);   
+    
+    if (_neighbor[2]!=MPI_PROC_NULL)MPI_Irecv(&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank] + 2) ],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,&request[_nb_req++]); // Définition d'une zone de réception
+    if (_neighbor[3]!=MPI_PROC_NULL)MPI_Irecv(&x[1+0*(_NxLoc[_rank] + 2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,&request[_nb_req++]);
+
+    if (_neighbor[2]!=MPI_PROC_NULL)MPI_Isend(&x[1+_NyLoc[_rank]*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,&request[_nb_req++]); // Envoi des valeurs 
+    if (_neighbor[3]!=MPI_PROC_NULL)MPI_Isend(&x[1+1*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,&request[_nb_req++]);
+
+    return _nb_req;
+  }
+
+  void Wait(MPI_Request* request,int _nb_req){ // Attente de la fin des communications asynchrones    
+
+    MPI_Waitall(_nb_req,request,MPI_STATUS_IGNORE); 
+    
+  }
+
+
+  void SynchroneComm(double* x,double* SendL,double* SendR,double* RecvL,double* RecvR){ // Méthode de communication synchrone entre les partitions juxatposées
     int etiquette=100;
 
-    if (_rank != _nbp-1) MPI_Sendrecv(&x[_NbElemtsLoc[_rank]],_nx,MPI_DOUBLE,_rank+1,etiquette,&x[_NbElemtsLoc[_rank]+_nx],_nx,MPI_DOUBLE,_rank+1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+    MPI_Sendrecv(SendL,_NyLoc[_rank],MPI_DOUBLE,_neighbor[0],etiquette,RecvR,_NyLoc[_rank],MPI_DOUBLE,_neighbor[1],etiquette,comm_2D,MPI_STATUS_IGNORE);
+
+    MPI_Sendrecv(SendR,_NyLoc[_rank],MPI_DOUBLE,_neighbor[1],etiquette,RecvL,_NyLoc[_rank],MPI_DOUBLE,_neighbor[0],etiquette,comm_2D,MPI_STATUS_IGNORE);
+     
+
+    MPI_Sendrecv(&x[_NyLoc[_rank]*(_NxLoc[_rank]+2)+1],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,MPI_STATUS_IGNORE);
     
     // Échange des valeurs entre bornes juxtaposées
 
-    if ( _rank != 0)  MPI_Sendrecv(&x[_nx],_nx,MPI_DOUBLE,_rank-1,etiquette,&x[0],_nx,MPI_DOUBLE,_rank-1,etiquette,MPI_COMM_WORLD,MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&x[_NxLoc[_rank]+3],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,&x[1],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,MPI_STATUS_IGNORE);
+
 
   }
 
+  
 
   void Next(double* Utemp, double* U, const double& dtloc){ // Calcul de notre partition au temps suivant
     const double dx = _Lx / double (_NbxElemtsGlob);
     const double dy = _Ly / double (_NbyElemtsGlob);
-    for (int j =1 ; j< _NyLoc[_rank];j++){
-      for (int i = 1; i<_NbxElemtsGlob; i++){
-	int I = i+j*_nx;
+   
+    for (int j = 2 ; j< _NyLoc[_rank];j++){
+      for (int i = 2; i<_NxLoc[_rank]; i++){
+	int I = i+j*(_NxLoc[_rank]+2);
+	if (_rank == 0) std::cout<<I<<std::endl;
 	Utemp[I]= U[I] + dtloc / dx / dx * ( U[I+1]- 2 * U[I]+ U[I-1] );
-	Utemp[I]+= dtloc / dy / dy * (U[ I+_nx ]- 2* U[I] + U[ I-_nx ]);
+	Utemp[I]+= dtloc / dy / dy * (U[ I+_NxLoc[_rank]+2 ]- 2* U[I] + U[ I-_NxLoc[_rank]-2 ]);
 	// Application de la méthode d'Euler Explicite 
       }
-    } 
+    }
   }
 
   void BoundNext(double* Utemp, double* U, const double& dtloc){ // Calcul des nos bornes de chaque partition nécessitant les communications 
     const double dx = _Lx / double (_NbxElemtsGlob);
     const double dy = _Ly / double (_NbyElemtsGlob);
-    
-    for (int i = 1; i<_NbxElemtsGlob; i++){
-      int I = i + _nx;
 
-      if (_rank!=0){
-	Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
-	Utemp[I]+= dtloc / dy / dy * (U[ I+_nx ]- 2* U[I] + U[ I-_nx ]);
-      }
-      else Utemp[I]=U[I];
+     if (_rank == 0) {
+       for (int l = 1; l<= _NyLoc[_rank]; l++){
+	 std::cout<<"BordH:"<< _NbLocGhost[_rank] - l-1  <<":"<<U[_NbLocGhost[_rank] - l-1 ]<<std::endl; 
+	 std::cout<<"BordG:"<< l*(_NxLoc[_rank]+2)<<":"<<U[l*(_NxLoc[_rank]+2)]<<std::endl;
+	 std::cout<<"BordD:"<< (l+1)*(_NxLoc[_rank]+2)-1<<":"<<U[(l+1)*(_NxLoc[_rank]+2)-1]<<std::endl;
+	 std::cout<<"BordB:"<< l<<":"<<U[l]<<std::endl;
+       }
+     }
+     for (int i = 1; i<= _NxLoc[_rank]; i++){
+       int j = 1;   //Bottom 
+       int I = i + (_NxLoc[_rank]+2);
+       if (_rank == 0) std::cout<<I<<std::endl;
 
-      I= i + _NyLoc[_rank]*_nx;
+       if (_neighbor[3]!=MPI_PROC_NULL){	 
 
-      if (_rank!=_nbp-1){
-	Utemp[I] = U[I] + dtloc /dx /dx * ( U[I+1] -  2 * U[I] + U[I-1] );
-	Utemp[I]+= dtloc / dy / dy * (U[ I+_nx ]- 2* U[I] + U[ I-_nx ]);
-      }
+	 if(i==1){
+	   if (_neighbor[0]!=MPI_PROC_NULL and _neighbor[3]!=MPI_PROC_NULL){
+	   Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	   Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+	   }
+	   else Utemp[I]=U[I];
+	 }
+	 
+	 else if(i==_NxLoc[_rank]){
+	   if (_neighbor[1]!=MPI_PROC_NULL and _neighbor[3]!=MPI_PROC_NULL){
+	     Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	     Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+	   }
+	   else Utemp[I]=U[I];
+	 }		
+	 else {
+	   Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	   Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+	 }
+       }
+       else Utemp[I]= U[I];
+     }
+
+
+       
+     for (int i = 1; i<= _NxLoc[_rank]; i++){
+       int j = _NyLoc[_rank]; // Top
+       int I= i+j*(_NxLoc[_rank]+2);
+       if (_rank == 0) std::cout<<I<<std::endl;
+       
+     if (_neighbor[2]!=MPI_PROC_NULL){	 
+
+	 if(i==1){
+	   if (_neighbor[0]!=MPI_PROC_NULL and _neighbor[3]!=MPI_PROC_NULL){
+	   Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	   Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+	   }
+	   else Utemp[I]=U[I];
+	 }
+	 
+	 else if(i==_NxLoc[_rank]){
+	   if (_neighbor[1]!=MPI_PROC_NULL and _neighbor[3]!=MPI_PROC_NULL){
+	     Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	     Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+	   }
+	   else Utemp[I]=U[I];
+	 }		
+	 else {
+	   Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	   Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+	 }
+       }
+       else Utemp[I]= U[I];
+     }
+     for (int j = 2; j< _NyLoc[_rank]; j++){
+       int i = 1 ; //Left
+       int I = i+j*(_NxLoc[_rank]+2);
+       if (_rank == 0) std::cout<<I<<std::endl;
+
       
-      else Utemp[I]= U[I];
-    }
+       if (_neighbor[0]!=MPI_PROC_NULL){
+	 Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	 Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+       }
+       
+       else Utemp[I]=U[I];
+     }
+     for (int j = 2; j< _NyLoc[_rank]; j++){
+       int i = _NxLoc[_rank]; // Right
+       int I =  i+j*(_NxLoc[_rank]+2);
+       if (_rank == 0) std::cout<<I<<std::endl;
+	
+       
+       if (_neighbor[1]!=MPI_PROC_NULL){
+	 Utemp[I]=U[I] + dtloc /dx /dx * ( U[I+1] - 2*U[I] + U[I-1]);
+	 Utemp[I]+= dtloc / dy / dy * (U[ I+ _NxLoc[_rank]+2 ]- 2* U[I] + U[ I- _NxLoc[_rank]-2 ]);
+	 
+
+
+       }
+       
+       else Utemp[I]=U[I];
+       
+     }      
+    
+      
   }
 
   double* Copy(double* Utemp, double* U){  // Redéfiniton de U au temps t suivant
-    for (int j = 1 ; j<= _NyLoc[_rank];j++){
-      for (int i = 1; i<_NbxElemtsGlob; i++){
-	int I = i+j* _nx;
+    for (int k =1; k<=_NyLoc[_rank];k++){
+      for (int i=1; i<=_NxLoc[_rank];i++){
+	int I = i+k*(_NxLoc[_rank]+2);
+	if (_rank==0){
+	  std::cout<<_rank<<"U:\t"<<I<<":"<<U[I]<<std::endl;
+	  std::cout<<_rank<<"Utemp:\t"<<I<<":"<<Utemp[I]<<std::endl;
+	}
 	U[I]=Utemp[I];
       }
     }
@@ -232,8 +417,8 @@ public:
 
   void Write(const int& Ind,const double* const x, Solution* Sol,double& T){  // Écriture externe des solutions au temps T 
     double* X = nullptr;
-    if(_rank == 0)  X = new double[_nx*(_NbyElemtsGlob+1)];
-    MPI_Gatherv(&x[_nx],_NbElemtsLoc[_rank],MPI_DOUBLE,X,_NbElemtsLoc,_deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);  // Réunion de nos partition sur un unique proc
+    if(_rank == 0)  X = new double[_nx*_ny];
+    MPI_Gatherv(&x[_NxLoc[_rank]],_NbElemtsLoc[_rank],MPI_DOUBLE,X,_NbElemtsLoc,_deplacement,MPI_DOUBLE,0,MPI_COMM_WORLD);  // Réunion de nos partition sur un unique proc
  
     if (_rank == 0){   
       std::stringstream mystream; 
@@ -274,9 +459,12 @@ private:
   int _debut;            // Premier indice de chaque partition 
   int _rank;             // Indice de chaque proc
   int* _NyLoc;
+  int* _NxLoc;
+  int _debutx;
+  int _debuty;
 
 public:
-  Error(const double& L,const int& Nx,const int& Ny, const int& k,const double& Tfinal,double* Initx ,double* Inity ,const int& debut,const int& fin,int* Nyloc):_L(L), _NbxElemtsGlob(Nx), _NbyElemtsGlob(Ny), _k(k), _Tfinal(Tfinal), _Mesh0x(Initx),_Mesh0y(Inity),_debut(debut),_fin(fin),_NyLoc(Nyloc){
+  Error(const double& L,const int& Nx,const int& Ny, const int& k,const double& Tfinal,double* Initx ,double* Inity ,const int& debutx ,const int& debuty,int* NyLoc,int* NxLoc):_L(L), _NbxElemtsGlob(Nx), _NbyElemtsGlob(Ny), _k(k), _Tfinal(Tfinal), _Mesh0x(Initx),_Mesh0y(Inity),_debutx(debutx),_debuty(debuty),_NyLoc(NyLoc),_NxLoc(NxLoc){
     MPI_Comm_rank(MPI_COMM_WORLD,&_rank);   //Constructeur de la classe
   } 
 
@@ -284,11 +472,10 @@ public:
 
   void ErrorInf(const double* Vect, Solution* Sol){  // Calcul de l'erreur en norme infinie
     double Errloc=0,Errglob=0; 
-    int j=_NbxElemtsGlob+1;
-    for (int k =0; k<_NyLoc[_rank];k++){
-      for (int i=0; i<=_NbxElemtsGlob;i++){
-	Errloc=std::max(Errloc,std::abs(Vect[j]-Sol->Exact(_Mesh0x[i],_Mesh0y[_debut/(_NbxElemtsGlob+1)+k],_Tfinal)));
-	j++;
+    for (int k =1; k<=_NyLoc[_rank];k++){
+      for (int i=1; i<=_NxLoc[_rank];i++){
+	int I = i+k*(_NxLoc[_rank]+2);
+	Errloc=std::max(Errloc,std::abs(Vect[I]-Sol->Exact(_Mesh0x[_debutx+i-1],_Mesh0y[_debuty+k-1],_Tfinal)));
       }
     }
     MPI_Reduce(&Errloc,&Errglob,1,MPI_DOUBLE,MPI_MAX,0,MPI_COMM_WORLD); //  Défnition du max entre tous les max de chaque proc 
@@ -296,23 +483,34 @@ public:
   }
 
 
-  void ErrorL2(const double* Vect, Solution* Sol){ // Calcul approché de l'erreur L2 par une quadrature de Gauss en 2 points
+  /*void ErrorL2(const double* Vect, Solution* Sol){ // Calcul approché de l'erreur L2 par une quadrature de Gauss en 2 points
     double Errloc=0,Errglob=0;
     double dx = _L/double(_NbxElemtsGlob);
+    double dy = _L/double(_NbyElemtsGlob);
     double x_1=1 /sqrt(3), x_2=-1/sqrt(3);
-    int j=1;
-    for (int i=_debut; i < _fin ; i++){
+    
+    for (int k =0; k<_NyLoc[_rank]-1;k++){
+      for (int i=0; i<_NbxElemtsGlob;i++){
+	int j= i+(k+1)*(_NbxElemtsGlob+1);
+	int K= _debut/(_NbxElemtsGlob+1)+k;const int Debuty() { return _debuty;
+	double xG1= (_Mesh0x[i+1]+_Mesh0x[i]) / 2 + (_Mesh0x[i+1]-_Mesh0x[i]) / 2 * x_1; // Défnition des points de Gauss
+	double xG2= (_Mesh0x[i+1]+_Mesh0x[i]) / 2 + (_Mesh0x[i+1]-_Mesh0x[i]) / 2 * x_2;
       
-      double xG1= (_Mesh0x[i+1]+_Mesh0x[i]) / 2 + (_Mesh0x[i+1]-_Mesh0x[i]) / 2 * x_1; // Défnition des points de Gauss
-      double xG2= (_Mesh0x[i+1]+_Mesh0x[i]) / 2 + (_Mesh0x[i+1]-_Mesh0x[i]) / 2 * x_2;
+	double yG1= (_Mesh0y[K+1]+_Mesh0y[K]) / 2 + (_Mesh0y[K+1]-_Mesh0y[K]) / 2 * x_1; // Défnition des points de Gauss
+	double yG2= (_Mesh0y[K+1]+_Mesh0y[K]) / 2 + (_Mesh0y[K+1]-_Mesh0y[K]) / 2 * x_2;
       
-      double yG1= (_Mesh0y[i+1]+_Mesh0y[i]) / 2 + (_Mesh0y[i+1]-_Mesh0y[i]) / 2 * x_1; // Défnition des points de Gauss
-      double yG2= (_Mesh0y[i+1]+_Mesh0y[i]) / 2 + (_Mesh0y[i+1]-_Mesh0y[i]) / 2 * x_2;
-      
-      Errloc+= dx / 2 * (-Sol->Exact(xG1,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1) * (-Sol->Exact(xG1,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1);
+	Errloc+= dx*dy / 4 * (-Sol->Exact(xG1,yG1,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1) * (-Sol->Exact(xG1,yG1,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1);
 
-      Errloc+= dx / 2 * (-Sol->Exact(xG2,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2) * (-Sol->Exact(xG2,0,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2);
-      j++;
+
+	Errloc+= dx*dy / 4 * (-Sol->Exact(xG1,yG2,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1) * (-Sol->Exact(xG1,yG2,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_1);
+
+	Errloc+= dx*dy / 4 * (-Sol->Exact(xG2,yG1,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2) * (-Sol->Exact(xG2,yG1,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2);
+
+	    
+	Errloc+= dx*dy / 4 * (-Sol->Exact(xG2,yG2,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2) * (-Sol->Exact(xG2,yG2,_Tfinal) + (Vect[j+1]+Vect[j])/2 + (Vect[j+1]-Vect[j])/2 *x_2);
+
+       
+      }
     }
 
     MPI_Reduce(&Errloc,&Errglob,1,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD); // Somme des erreurs calculées sur chaque proc 
@@ -320,9 +518,11 @@ public:
     if(_rank==0) std::cout<<"ErreurL2="<<sqrt(Errglob)<<std::endl;
 
   }
+  */
 };
  
-   
+
+  
     
     
 
@@ -367,11 +567,15 @@ int main (int argc, char *argv[]){
   
   Mesh Mesh(Nx,Ny,Lx,Ly);  
 
+  Mesh.DefComm();
+  Mesh.Defneighbor();
   Mesh.computeNbElemtsLoc(); // On calcule nos premières valeurs permettant nos calculs
+  Mesh.NbLocGhost();
   Mesh.computeDeplacement();
   Mesh.setDebut();
-  Mesh.setFin();
- 
+
+  int* NxLoc=Mesh.NxLoc();
+  int* NyLoc=Mesh.NyLoc();
 
   double* x = Mesh.DefMeshx();  // Définition du maillage global en abscisse
   double* y = Mesh.DefMeshy();  // Définition du maillage global en ordonnée
@@ -383,39 +587,44 @@ int main (int argc, char *argv[]){
   int kT=0,Ind=0;
  
   double* Utemp= Mesh.AllocateMemory(); // Allocation mémoire du vecteur au temps t+1
+
+  double* SendL=Mesh.AllocateCommMemory();
+  double* SendR=Mesh.AllocateCommMemory();
+  double* RecvL=Mesh.AllocateCommMemory();
+  double* RecvR=Mesh.AllocateCommMemory();
  
 
-  MPI_Request request[4];  // Création de nos identifiants de requête pour la méthode asynchrone
+  MPI_Request request[8];  // Création de nos identifiants de requête pour la méthode asynchrone
   
   
   double* U =  Mesh.Initialize(Sol);  // Initialisation du maillage en fonction de la solution
  
-   
-   
+  MPI_Datatype MPI_COL = Mesh.DefMess();
+       
+       
   while( t < Tfinal ) {  // Boucle de calcul sur le temps 
   
     if ( t + dtloc > Tfinal) dtloc = Tfinal - t;   // Assurance de terminer au temps Tfinal 
 
     if (rang==0)temps_debut=MPI_Wtime();  // Marqueur de temps=0 pour le temps de calcul
 
-    
     if ( method == 1) { // Utilisation de la méthode de communication asynchrone
 
-      Mesh.AsynchroneComm(U,request);     // Réalistion des communications 
-      Mesh.Next(Utemp,U,dtloc);           // Calcul au temps suivant
-      Mesh.Wait(request);                 // Attente de la fin des communications 
-      Mesh.BoundNext(Utemp,U,dtloc);      // Calcul des bords nécessitant les communications 
-      Mesh.Copy(Utemp,U);                 // Passsage de U au temps suivant 
+      int nb_req = Mesh.AsynchroneComm(U,request,MPI_COL,RecvL,RecvR);     // Réalistion des communications 
+      Mesh.Next(Utemp,U,dtloc);                                                // Calcul au temps suivant
+      Mesh.Wait(request,nb_req);                                               // Attente de la fin des communications 
+      Mesh.BoundNext(Utemp,U,dtloc);                                           // Calcul des bords nécessitant les communications 
+      Mesh.Copy(Utemp,U);                                                      // Passsage de U au temps suivant 
 
     }
 
     
     if ( method == 2) { // Utilisation de la méthode de communication synchrone
 
-      Mesh.SynchroneComm(U);              // Réalisation des communications 
-      Mesh.Next(Utemp,U,dtloc);           // Calcul au temps suivant
-      Mesh.BoundNext(Utemp,U,dtloc);      // Calcul des bords nécessiant les communications
-      Mesh.Copy(Utemp,U);                 // Passage de U au temps suivant
+      Mesh.SynchroneComm(U,SendL,SendR,RecvL,RecvR);              // Réalisation des communications 
+      Mesh.Next(Utemp,U,dtloc);                                   // Calcul au temps suivant
+      Mesh.BoundNext(Utemp,U,dtloc);                              // Calcul des bords nécessiant les communications
+      Mesh.Copy(Utemp,U);                                         // Passage de U au temps suivant
     }
 
 
@@ -431,7 +640,7 @@ int main (int argc, char *argv[]){
 
     if (kT % kprint == 0) {  // On écrit un fichier tous les kprint itérations 
 
-      Mesh.Write(Ind,U,Sol,t); // Écriture du fichier 
+      //Mesh.Write(Ind,U,Sol,t); // Écriture du fichier 
       Ind++; 
      }
      
@@ -439,7 +648,7 @@ int main (int argc, char *argv[]){
     kT++;     // Nombre d'itérations 
   }
 
-  Error Error(Lx,Nx,Ny,K,Tfinal,x,y,Mesh.Debut(),Mesh.Fin(),Mesh.Nyloc());
+  Error Error(Lx,Nx,Ny,K,Tfinal,x,y,Mesh.Debutx(),Mesh.Debuty(),NyLoc,NxLoc);
 
   
   
@@ -447,7 +656,7 @@ int main (int argc, char *argv[]){
 
 
   Error.ErrorInf(U,Sol);                   // Calcul de l'erreur en norme infinie 
-  Error.ErrorL2(U,Sol);                    // Calcul de l'erreur en norme L2 
+  //Error.ErrorL2(U,Sol);                    // Calcul de l'erreur en norme L2 
 
   
 
