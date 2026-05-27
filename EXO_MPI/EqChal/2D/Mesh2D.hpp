@@ -8,6 +8,81 @@
 #include <cmath>
 #include <mpi.h>
 
+
+class Comm{   // Communication internes
+private:
+  int* _NyLoc;
+  int* _NxLoc;
+  int _rank;
+  MPI_Comm _comm_2D;
+  int* _neighbor;
+  int _nb_req;
+  
+public:
+  Comm( int* NxLoc, int* NyLoc, MPI_Comm Comm_2D, int* neighbor): _NxLoc(NxLoc), _NyLoc(NyLoc), _comm_2D(Comm_2D),_neighbor(neighbor){
+    MPI_Comm_rank(MPI_COMM_WORLD,&_rank);                        // Indicage des proc
+  }
+
+    
+  MPI_Datatype DefMess(){     // On définit un nouveau type de données représentant une colonne de notre matrice 
+    MPI_Datatype MPI_COL;
+    MPI_Type_vector(_NyLoc[_rank],1,_NxLoc[_rank]+2,MPI_DOUBLE,&MPI_COL);
+    MPI_Type_commit(&MPI_COL);
+    return MPI_COL;
+  }
+
+
+  
+  int AsynchroneComm(double* x, MPI_Request* request,MPI_Datatype MPI_COL) {  // Méthode de communication asynchrone entre les partitions juxatposées 
+    int etiquette=100;
+    int _nb_req = 0;
+
+    for (int i=0;i < 8 ;i++) request[i]=MPI_REQUEST_NULL;
+
+
+    MPI_Irecv(&x[0+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,_comm_2D,&request[_nb_req++]); 
+    MPI_Irecv(&x[(_NxLoc[_rank]+1)+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,_comm_2D,&request[_nb_req++]);
+
+    MPI_Isend(&x[1+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,_comm_2D,&request[_nb_req++]); // Envoi des valeurs 
+    MPI_Isend(&x[_NxLoc[_rank]+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,_comm_2D,&request[_nb_req++]);   
+    
+    MPI_Irecv(&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank] + 2) ],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,_comm_2D,&request[_nb_req++]); 
+    MPI_Irecv(&x[1+0*(_NxLoc[_rank] + 2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,_comm_2D,&request[_nb_req++]);
+
+    MPI_Isend(&x[1+_NyLoc[_rank]*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,_comm_2D,&request[_nb_req++]); // Envoi des valeurs 
+    MPI_Isend(&x[1+1*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,_comm_2D,&request[_nb_req++]);
+
+    return _nb_req;
+  }
+
+  void Wait(MPI_Request* request,int _nb_req){ // Attente de la fin des communications asynchrones    
+
+    MPI_Waitall(_nb_req,request,MPI_STATUS_IGNORE); 
+    
+  }
+
+
+  void SynchroneComm(double* x,MPI_Datatype MPI_COL){ // Méthode de communication synchrone entre les partitions juxatposées
+    int etiquette=100;
+
+    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,&x[(_NxLoc[_rank]+1)+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,_comm_2D,MPI_STATUS_IGNORE);
+
+    MPI_Sendrecv(&x[_NxLoc[_rank]+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,&x[0+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,_comm_2D,MPI_STATUS_IGNORE);
+     
+
+    MPI_Sendrecv(&x[1+_NyLoc[_rank]*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,&x[1],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,_comm_2D,MPI_STATUS_IGNORE);
+    
+    // Échange des valeurs entre bornes juxtaposées
+
+    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,_comm_2D,MPI_STATUS_IGNORE);
+
+
+  }
+
+};
+
+
+       
 class Mesh{   // Classe réalisant notre méthode de calcul parallélisé 
 private:
   double _Lx;                // Longueur du maillage en abscisse
@@ -16,10 +91,8 @@ private:
   int _nx;                   // Nombre réel d'élément sur une ligne 
   int _NbyElemtsGlob;        // Nombre de cellules en ordonnée définies globalement
   int _ny;                   // Nombre réel d'élement sur une colonne
-  int _debut;                // Indice relatif au premier élément d'une partition par rapport au maillage initial
-  int* _debutx;
-  int* _debuty;
-  int _fin;                  // Indice relatif au dernier élément d'une partition par rapport au maillage initial
+  int* _debutx;              // Premier indice d'un proc sur l'axe des abscisses
+  int* _debuty;              // Premier indice d'un proc sur l'axe des ordonnées
   int* _NbElemtsLoc;         // Vecteur contenant le nombre d'élements de chaque proc
   int* _NyLoc;               // Vecteur contenant le nombre de lignes de chaque proc
   int* _NxLoc;               // Vecteur contenant le nombre de colonnes de chaque proc
@@ -29,12 +102,11 @@ private:
   double* _Init;             // Vecteur initial
   double* _Mesh0x;           // Maillage en abscisse initial
   double* _Mesh0y;           // Maillage en ordonnée initial 
-  int* _dims;              // Nombre de proc par dimension
+  int* _dims;                // Nombre de proc par dimension
   int _neighbor[4];          // Rang des proc voisins
-  MPI_Comm comm_2D;
-  int* _coords;
-  int _nb_req;
-  int* _NbLocGhost;
+  MPI_Comm comm_2D;          // Communicateur dans un repère cartésien
+  int* _coords;              // Coordonnées cartésiennes des prorcs
+  int* _NbLocGhost;          // Nombre de cellules locales incluant les cellules fantômes
   
 public:
   Mesh(const int& Nx,const int& Ny,const double& Lx,const double& Ly): _NbxElemtsGlob(Nx),_NbyElemtsGlob(Ny),_Lx(Lx), _Ly(Ly) {   // Constructeur de la classe
@@ -78,6 +150,8 @@ public:
 
 
   }
+
+  int* Neighbor(){return _neighbor;}
 
   void computeNbElemtsLoc(){   // Définition du nombre de cellules sur chaque partition
     _NbElemtsLoc= new int[_nbp];
@@ -166,61 +240,6 @@ public:
 
   double* AllocateCommMemory(){
     return new double[_NyLoc[_rank]];
-  }
-
-
-  
-  MPI_Datatype DefMess(){     // On définit un nouveau type de données représentant une colonne de notre matrice 
-    MPI_Datatype MPI_COL;
-    MPI_Type_vector(_NyLoc[_rank],1,_NxLoc[_rank]+2,MPI_DOUBLE,&MPI_COL);
-    MPI_Type_commit(&MPI_COL);
-    return MPI_COL;
-  }
-
-  int AsynchroneComm(double* x, MPI_Request* request,MPI_Datatype MPI_COL) {  // Méthode de communication asynchrone entre les partitions juxatposées 
-    int etiquette=100;
-    int _nb_req = 0;
-
-    for (int i=0;i < 8 ;i++) request[i]=MPI_REQUEST_NULL;
-
-
-    MPI_Irecv(&x[0+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,comm_2D,&request[_nb_req++]); 
-    MPI_Irecv(&x[(_NxLoc[_rank]+1)+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,comm_2D,&request[_nb_req++]);
-
-    MPI_Isend(&x[1+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,comm_2D,&request[_nb_req++]); // Envoi des valeurs 
-    MPI_Isend(&x[_NxLoc[_rank]+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,comm_2D,&request[_nb_req++]);   
-    
-    MPI_Irecv(&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank] + 2) ],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,&request[_nb_req++]); 
-    MPI_Irecv(&x[1+0*(_NxLoc[_rank] + 2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,&request[_nb_req++]);
-
-    MPI_Isend(&x[1+_NyLoc[_rank]*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,&request[_nb_req++]); // Envoi des valeurs 
-    MPI_Isend(&x[1+1*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,&request[_nb_req++]);
-
-    return _nb_req;
-  }
-
-  void Wait(MPI_Request* request,int _nb_req){ // Attente de la fin des communications asynchrones    
-
-    MPI_Waitall(_nb_req,request,MPI_STATUS_IGNORE); 
-    
-  }
-
-
-  void SynchroneComm(double* x,MPI_Datatype MPI_COL){ // Méthode de communication synchrone entre les partitions juxatposées
-    int etiquette=100;
-
-    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,&x[(_NxLoc[_rank]+1)+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,comm_2D,MPI_STATUS_IGNORE);
-
-    MPI_Sendrecv(&x[_NxLoc[_rank]+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,&x[0+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,comm_2D,MPI_STATUS_IGNORE);
-     
-
-    MPI_Sendrecv(&x[1+_NyLoc[_rank]*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,&x[1],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,MPI_STATUS_IGNORE);
-    
-    // Échange des valeurs entre bornes juxtaposées
-
-    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,MPI_STATUS_IGNORE);
-
-
   }
 
   

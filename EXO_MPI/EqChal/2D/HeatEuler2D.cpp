@@ -51,7 +51,7 @@ int main (int argc, char *argv[]){
   
   Mesh Mesh(Nx,Ny,Lx,Ly);  
 
-  Mesh.DefComm();
+  MPI_Comm Comm_2D=Mesh.DefComm();
   Mesh.Defneighbor();
   Mesh.computeNbElemtsLoc(); // On calcule nos premières valeurs permettant nos calculs
   Mesh.NbLocGhost();
@@ -78,8 +78,9 @@ int main (int argc, char *argv[]){
   
   
   double* U =  Mesh.Initialize(Sol);  // Initialisation du maillage en fonction de la solution
- 
-  MPI_Datatype MPI_COL = Mesh.DefMess();
+
+  Comm Comm(NxLoc,NyLoc,Comm_2D,Mesh.Neighbor());
+  MPI_Datatype MPI_COL = Comm.DefMess();
        
        
   while( t < Tfinal ) {  // Boucle de calcul sur le temps 
@@ -90,9 +91,9 @@ int main (int argc, char *argv[]){
 
     if ( method == 1) { // Utilisation de la méthode de communication asynchrone
 
-      int nb_req = Mesh.AsynchroneComm(U,request,MPI_COL);                     // Réalistion des communications 
+      int nb_req = Comm.AsynchroneComm(U,request,MPI_COL);                     // Réalistion des communications 
       Mesh.Next(Utemp,U,dtloc);                                                // Calcul au temps suivant
-      Mesh.Wait(request,nb_req);                                               // Attente de la fin des communications 
+      Comm.Wait(request,nb_req);                                               // Attente de la fin des communications 
       Mesh.BoundNext(Utemp,U,dtloc);                                           // Calcul des bords nécessitant les communications 
       Mesh.Copy(Utemp,U);                                                      // Passsage de U au temps suivant 
 
@@ -101,7 +102,7 @@ int main (int argc, char *argv[]){
     
     if ( method == 2) { // Utilisation de la méthode de communication synchrone
 
-      Mesh.SynchroneComm(U,MPI_COL);              // Réalisation des communications 
+      Comm.SynchroneComm(U,MPI_COL);              // Réalisation des communications 
       Mesh.Next(Utemp,U,dtloc);                                   // Calcul au temps suivant
       Mesh.BoundNext(Utemp,U,dtloc);                              // Calcul des bords nécessiant les communications
       Mesh.Copy(Utemp,U);                                         // Passage de U au temps suivant
