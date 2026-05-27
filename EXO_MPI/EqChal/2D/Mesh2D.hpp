@@ -209,16 +209,16 @@ public:
   void SynchroneComm(double* x,MPI_Datatype MPI_COL){ // Méthode de communication synchrone entre les partitions juxatposées
     int etiquette=100;
 
-    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],_NyLoc[_rank],MPI_COL,_neighbor[0],etiquette,&x[(_NxLoc[_rank]+1)+1*(_NxLoc[_rank]+2)],_NyLoc[_rank],MPI_COL,_neighbor[1],etiquette,comm_2D,MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,&x[(_NxLoc[_rank]+1)+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,comm_2D,MPI_STATUS_IGNORE);
 
-    MPI_Sendrecv(&x[_NxLoc[_rank]+1*(_NxLoc[_rank]+2)],_NyLoc[_rank],MPI_COL,_neighbor[1],etiquette,&x[0+1*(_NxLoc[_rank]+2)],_NyLoc[_rank],MPI_DOUBLE,_neighbor[0],etiquette,comm_2D,MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&x[_NxLoc[_rank]+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[1],etiquette,&x[0+1*(_NxLoc[_rank]+2)],1,MPI_COL,_neighbor[0],etiquette,comm_2D,MPI_STATUS_IGNORE);
      
 
-    MPI_Sendrecv(&x[_NyLoc[_rank]*(_NxLoc[_rank]+2)+1],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&x[1+_NyLoc[_rank]*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,&x[1],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,MPI_STATUS_IGNORE);
     
     // Échange des valeurs entre bornes juxtaposées
 
-    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,&x[1],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,comm_2D,MPI_STATUS_IGNORE);
+    MPI_Sendrecv(&x[1+1*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[2],etiquette,&x[1+(_NyLoc[_rank]+1)*(_NxLoc[_rank]+2)],_NxLoc[_rank],MPI_DOUBLE,_neighbor[3],etiquette,comm_2D,MPI_STATUS_IGNORE);
 
 
   }
