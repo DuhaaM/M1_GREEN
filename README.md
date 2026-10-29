@@ -1,11 +1,5 @@
 # GREEN
 
-## Rapport
-
-Je propose que tu utilises le [wiki du projet](https://git.univ-pau.fr/mduhaa/GREEN/-/wikis/home) pour ton rapport
-
-
-
 
 ## Getting started
 
